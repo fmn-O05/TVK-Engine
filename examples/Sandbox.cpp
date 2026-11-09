@@ -1,10 +1,4 @@
-#include "tvk/TVK_Camera.h"
-#include "tvk/TVK_CommandBuffer.h"
-#include "tvk/TVK_Fog.h"
-#include "tvk/TVK_Math.h"
-#include "tvk/TVK_Mesh.h"
-#include "tvk/TVK_PAL.h"
-#include "tvk/TVK_Renderer.h"
+#include "tvk/TVK.h"
 #include <algorithm>
 #include <chrono>
 #include <clocale>
@@ -131,9 +125,8 @@ public:
   }
 
   void Update(float dt, float t, tvk::Camera &cam) {
+    (void)dt;
     m_Time = t;
-
-    float panX = 15.f * std::sin(t * 0.3f);
 
     cam.Orbit(kPi * 0.15f, -0.2f);
     cam.Zoom(50.f);

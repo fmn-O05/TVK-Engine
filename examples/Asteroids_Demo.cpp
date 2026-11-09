@@ -1,8 +1,4 @@
-#include "tvk/TVK_Renderer.h"
-#include "tvk/TVK_Camera.h"
-#include "tvk/TVK_Math.h"
-#include "tvk/TVK_Mesh.h"
-#include "tvk/TVK_CommandBuffer.h"
+#include "tvk/TVK.h"
 #include <chrono>
 #include <thread>
 #include <cmath>
@@ -81,7 +77,7 @@ namespace sandbox {
     class AsteroidFieldScene {
     public:
         AsteroidFieldScene(int asteroidCount, float fieldRadius)
-            : m_FieldRadius(fieldRadius), m_AsteroidCount(asteroidCount)
+            : m_AsteroidCount(asteroidCount), m_FieldRadius(fieldRadius)
         {
             m_SharedCubeMesh = CreateDemoCube();
 

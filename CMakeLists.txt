@@ -1,179 +1,137 @@
 cmake_minimum_required(VERSION 3.20)
-project(TVK_Engine LANGUAGES C CXX)
+project(TVK_Engine VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-option(TVK_USE_NOTCURSES  "Build notcurses backend (MinGW/GCC/Clang only)" OFF)
-option(TVK_USE_OBJLOADER  "Bundle tinyobjloader for .OBJ mesh loading"     OFF)
+# ============================================================================
+# Build Options
+# ============================================================================
+option(TVK_BUILD_EXAMPLES "Build TVK Engine example applications" ON)
+option(TVK_BUILD_TESTS    "Build TVK Engine unit and integration tests" OFF)
+option(TVK_ENABLE_SIMD    "Enable AVX2/FMA SIMD acceleration on x86_64" ON)
 
-if(TVK_USE_NOTCURSES AND MSVC)
-    message(WARNING "[TVK] TVK_USE_NOTCURSES requires MinGW/GCC/Clang. Disabling for MSVC.")
-    set(TVK_USE_NOTCURSES OFF CACHE BOOL "" FORCE)
-endif()
-
+# ============================================================================
+# Engine Core Library Sources (Organized by Subsystem Layer)
+# ============================================================================
 set(TVK_CORE_SOURCES
-    src/tvk/TVK_Camera.cpp
-    src/tvk/TVK_CommandBuffer.cpp
-    src/tvk/TVK_JobSystem.cpp
-    src/tvk/TVK_Math.cpp
-    src/tvk/TVK_PAL.cpp
-    src/tvk/TVK_Primitives.cpp
-    src/tvk/TVK_Rasterizer.cpp
-    src/tvk/TVK_Renderer.cpp
-    src/tvk/TVK_TerminalPresenter.cpp
+    # Layer 0: Core (Threading, Job System, Memory, Profiling)
+    src/core/JobSystem.cpp
+
+    # Layer 1: Platform Abstraction Layer (Terminal TTY, Input, Timing)
+    src/platform/PAL.cpp
+
+    # Layer 2: Math & SIMD Kernels
+    src/math/Math.cpp
+
+    # Layer 3: 3D Software Renderer & Terminal Presentation
+    src/renderer/Camera.cpp
+    src/renderer/CommandBuffer.cpp
+    src/renderer/Primitives.cpp
+    src/renderer/Rasterizer.cpp
+    src/renderer/Renderer.cpp
+    src/renderer/TerminalPresenter.cpp
+
+    # Layer 4: Scene & ECS (Phase 4)
+    # Layer 5: Physics & Collision (Phase 5)
+    # Layer 6: 2D Canvas & Terminal UI (Phase 3 / Phase 6)
+    # Layer 7: Asset Pipeline (Phase 6)
+    # Layer 8: Audio Subsystem (Phase 7)
+    # Layer 9: Engine Runtime & Application Host (Phase 1 / Phase 4)
 )
 
-if(TVK_USE_NOTCURSES)
-    list(APPEND TVK_CORE_SOURCES src/tvk/TVK_NotcursesPresenter.cpp)
-endif()
-
 add_library(tvk_core STATIC ${TVK_CORE_SOURCES})
-target_include_directories(tvk_core PUBLIC include)
+add_library(tvk::core ALIAS tvk_core)
 
-if(MSVC)
-    target_compile_options(tvk_core PRIVATE
-        /O2 /W4 /arch:AVX2
-        /wd4324
-        /wd4100
-    )
-else()
+target_include_directories(tvk_core
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+)
 
-    target_compile_options(tvk_core PRIVATE
-        -O3 -Wall -Wextra
-        -march=native -mavx2 -mfma
-        -fstrict-aliasing
-        -fno-exceptions
-    )
+# ============================================================================
+# Compiler & Architecture Flags
+# ============================================================================
+function(tvk_configure_target target_name)
+    if(MSVC)
+        target_compile_options(${target_name} PRIVATE
+            /O2 /W4
+            /wd4324 # structure was padded due to alignment specifier
+            /wd4100 # unreferenced formal parameter
+        )
+        if(TVK_ENABLE_SIMD)
+            target_compile_options(${target_name} PRIVATE /arch:AVX2)
+        endif()
+    else()
+        target_compile_options(${target_name} PRIVATE
+            -O3 -Wall -Wextra
+            -fstrict-aliasing
+            -fno-exceptions
+        )
+        if(TVK_ENABLE_SIMD AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|AMD64|i686)")
+            target_compile_options(${target_name} PRIVATE -march=native -mavx2 -mfma)
+        endif()
 
-    target_link_options(tvk_core PUBLIC
-        -static-libgcc
-        -static-libstdc++
-        -Wl,-Bstatic,--whole-archive -lwinpthread -Wl,--no-whole-archive,-Bdynamic
-    )
+        if(MINGW)
+            target_link_options(${target_name} PUBLIC
+                -static-libgcc
+                -static-libstdc++
+                -Wl,-Bstatic,--whole-archive -lwinpthread -Wl,--no-whole-archive,-Bdynamic
+            )
+        endif()
 
-    if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-        target_link_options(tvk_core PRIVATE -Wl,--large-address-aware)
+        if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+            target_link_options(${target_name} PRIVATE -Wl,--large-address-aware)
+        endif()
     endif()
-endif()
+endfunction()
+
+tvk_configure_target(tvk_core)
 
 if(WIN32)
     target_link_libraries(tvk_core PRIVATE winmm)
 endif()
 
 find_package(Threads REQUIRED)
-target_link_libraries(tvk_core PRIVATE Threads::Threads)
+target_link_libraries(tvk_core PUBLIC Threads::Threads)
 
-if(TVK_USE_NOTCURSES)
-    include(ExternalProject)
+# ============================================================================
+# Example Applications
+# ============================================================================
+if(TVK_BUILD_EXAMPLES)
+    add_executable(sandbox examples/Sandbox.cpp)
+    target_link_libraries(sandbox PRIVATE tvk::core)
+    tvk_configure_target(sandbox)
 
-    set(NC_SRC_DIR     "${CMAKE_SOURCE_DIR}/notcurses-master/notcurses-master")
-    set(NC_BUILD_DIR   "${CMAKE_BINARY_DIR}/_notcurses_build")
-    set(NC_INSTALL_DIR "${CMAKE_BINARY_DIR}/_notcurses_install")
-    set(NC_LIB         "${NC_INSTALL_DIR}/lib/libnotcurses-core.a")
-
-    ExternalProject_Add(notcurses_ext
-        SOURCE_DIR   "${NC_SRC_DIR}"
-        BINARY_DIR   "${NC_BUILD_DIR}"
-        INSTALL_DIR  "${NC_INSTALL_DIR}"
-        CMAKE_ARGS
-            -DCMAKE_BUILD_TYPE=Release
-            -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
-            -DUSE_MULTIMEDIA=none
-            -DUSE_DOCTEST=off
-            -DUSE_PANDOC=off
-            -DBUILD_EXECUTABLES=off
-            -DBUILD_TESTING=off
-            -DUSE_STATIC=on
-            -DUSE_CXX=off
-            -DUSE_POC=off
-        BUILD_BYPRODUCTS "${NC_LIB}"
-    )
-
-    file(MAKE_DIRECTORY "${NC_INSTALL_DIR}/include")
-
-    add_library(nc_core_lib STATIC IMPORTED GLOBAL)
-    set_target_properties(nc_core_lib PROPERTIES
-        IMPORTED_LOCATION             "${NC_LIB}"
-        INTERFACE_INCLUDE_DIRECTORIES "${NC_INSTALL_DIR}/include"
-    )
-    add_dependencies(nc_core_lib notcurses_ext)
-
-    target_compile_definitions(tvk_core PUBLIC TVK_NOTCURSES_AVAILABLE)
-    target_include_directories(tvk_core PRIVATE "${NC_INSTALL_DIR}/include")
-    target_link_libraries(tvk_core PRIVATE nc_core_lib)
-
-    if(WIN32)
-
-        target_link_libraries(tvk_core PRIVATE unistring ncursesw systre tre intl iconv pcre2-posix pcre2-8 secur32 ws2_32 wsock32 deflate)
-    else()
-        find_package(PkgConfig QUIET)
-        if(PKG_CONFIG_FOUND)
-            pkg_check_modules(UNISTRING libunistring)
-            if(UNISTRING_FOUND)
-                target_link_libraries(tvk_core PRIVATE ${UNISTRING_LIBRARIES})
-                target_include_directories(tvk_core PRIVATE ${UNISTRING_INCLUDE_DIRS})
-            else()
-                target_link_libraries(tvk_core PRIVATE unistring)
-            endif()
-        else()
-            target_link_libraries(tvk_core PRIVATE unistring)
-        endif()
-    endif()
-
-    message(STATUS "[TVK] notcurses backend: ENABLED (building from bundled source)")
-    message(STATUS "[TVK]   Source  : ${NC_SRC_DIR}")
-    message(STATUS "[TVK]   Install : ${NC_INSTALL_DIR}")
+    add_executable(asteroids examples/Asteroids_Demo.cpp)
+    target_link_libraries(asteroids PRIVATE tvk::core)
+    tvk_configure_target(asteroids)
 endif()
 
-if(TVK_USE_OBJLOADER)
-    include(FetchContent)
-    FetchContent_Declare(
-        tinyobjloader
-        GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
-        GIT_TAG        v2.0.0rc13
-        GIT_SHALLOW    ON
-    )
-    FetchContent_MakeAvailable(tinyobjloader)
-
-    target_compile_definitions(tvk_core PUBLIC TVK_OBJ_LOADER_AVAILABLE)
-    target_link_libraries(tvk_core PRIVATE tinyobjloader::tinyobjloader)
-    message(STATUS "[TVK] tinyobjloader: ENABLED (v2.0.0rc13)")
+# ============================================================================
+# Tests (Phase 1+)
+# ============================================================================
+if(TVK_BUILD_TESTS)
+    enable_testing()
 endif()
 
-add_executable(sandbox examples/Sandbox.cpp)
-target_link_libraries(sandbox PRIVATE tvk_core)
-
-add_executable(asteroids examples/Asteroids_Demo.cpp)
-target_link_libraries(asteroids PRIVATE tvk_core)
-
-if(MSVC)
-    target_compile_options(sandbox PRIVATE /O2 /arch:AVX2)
-    target_compile_options(asteroids PRIVATE /O2 /arch:AVX2)
-else()
-    target_compile_options(sandbox PRIVATE -O3 -march=native -mavx2 -mfma)
-    target_compile_options(asteroids PRIVATE -O3 -march=native -mavx2 -mfma)
-    target_link_options(sandbox PRIVATE
-        -static-libgcc
-        -static-libstdc++
-        -Wl,-Bstatic,--whole-archive -lwinpthread -Wl,--no-whole-archive,-Bdynamic
-    )
-    target_link_options(asteroids PRIVATE
-        -static-libgcc
-        -static-libstdc++
-        -Wl,-Bstatic,--whole-archive -lwinpthread -Wl,--no-whole-archive,-Bdynamic
-    )
-endif()
-
+# ============================================================================
+# Configuration Summary
+# ============================================================================
 message(STATUS "")
-message(STATUS "╔══════════════════════════════════════╗")
-message(STATUS "║     TVK Engine Build Configuration   ║")
-message(STATUS "╠══════════════════════════════════════╣")
-message(STATUS "║  Compiler    : ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
-message(STATUS "║  Build type  : ${CMAKE_BUILD_TYPE}")
-message(STATUS "║  Notcurses   : ${TVK_USE_NOTCURSES}")
-message(STATUS "║  OBJ loader  : ${TVK_USE_OBJLOADER}")
-message(STATUS "╚══════════════════════════════════════╝")
+message(STATUS "╔══════════════════════════════════════════════════════╗")
+message(STATUS "║             TVK Engine Build Configuration           ║")
+message(STATUS "╠══════════════════════════════════════════════════════╣")
+message(STATUS "║  Version       : ${PROJECT_VERSION}")
+message(STATUS "║  Platform      : ${CMAKE_SYSTEM_NAME} (${CMAKE_SYSTEM_PROCESSOR})")
+message(STATUS "║  Compiler      : ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
+message(STATUS "║  Build Type    : ${CMAKE_BUILD_TYPE}")
+message(STATUS "║  SIMD (AVX2)   : ${TVK_ENABLE_SIMD}")
+message(STATUS "║  Examples      : ${TVK_BUILD_EXAMPLES}")
+message(STATUS "║  Tests         : ${TVK_BUILD_TESTS}")
+message(STATUS "╚══════════════════════════════════════════════════════╝")
 message(STATUS "")
