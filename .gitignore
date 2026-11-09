@@ -1,0 +1,41 @@
+# Build directories
+build/
+build_*/
+cmake-build-*/
+bin/
+out/
+
+# Compiled object files and binaries
+*.exe
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
+
+# IDE & Editor files
+.idea/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.ninja
+.ninja_*
+compile_commands.json
+
+# Performance benchmarks and logs
+perf_log.csv
+latest_perf.txt
+*.log
+
+# External third-party dumps
+notcurses-master/
