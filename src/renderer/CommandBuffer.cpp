@@ -15,13 +15,14 @@ namespace tvk {
         if (m_IsRecording) m_CurrentPipeline = pso;
     }
 
-    void CommandBuffer::DrawMesh(const Mesh& mesh, const Mat4& transform) {
+    void CommandBuffer::DrawMesh(const Mesh& mesh, const Mat4& transform, Color color) {
         if (!m_IsRecording) return;
         RenderCommand cmd;
         cmd.type      = CommandType::DrawMesh;
         cmd.pso       = m_CurrentPipeline;
         cmd.mesh      = &mesh;
         cmd.transform = transform;
+        cmd.color     = color;
         m_Commands.push_back(cmd);
     }
 

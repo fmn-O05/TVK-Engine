@@ -11,6 +11,9 @@ namespace tvk {
         class PrimitiveManager {
         public:
             void ApplyDetailProfile(float base_scale, int term_w, bool adaptive, int quality_preset);
+            void ApplyDetailProfile(float base_scale, int term_w, bool adaptive, QualityPreset preset) {
+                ApplyDetailProfile(base_scale, term_w, adaptive, static_cast<int>(preset));
+            }
             void RebuildSharedMeshes();
 
             const Mesh& GetSphere() const { return m_SharedSphere; }

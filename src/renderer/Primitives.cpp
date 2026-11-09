@@ -9,6 +9,8 @@ namespace primitives {
     static constexpr float kTau = 6.28318530718f;
 
     Mesh CreateSphere(int lat, int lon) {
+        lat = std::max(2, lat);
+        lon = std::max(3, lon);
         std::vector<Vertex>   vertices;
         std::vector<uint32_t> indices;
         vertices.reserve(static_cast<size_t>((lat + 1) * (lon + 1)));
@@ -39,6 +41,8 @@ namespace primitives {
     }
 
     Mesh CreateCylinder(int cyl_len, int cyl_ring) {
+        cyl_len  = std::max(1, cyl_len);
+        cyl_ring = std::max(3, cyl_ring);
         std::vector<Vertex>   vertices;
         std::vector<uint32_t> indices;
 
@@ -99,6 +103,7 @@ namespace primitives {
     }
 
     Mesh CreateGround(int steps) {
+        steps = std::max(1, steps);
         std::vector<Vertex>   vertices;
         std::vector<uint32_t> indices;
         const Vec3 normal = {0, 1, 0};

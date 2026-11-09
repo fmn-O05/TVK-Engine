@@ -6,6 +6,9 @@
 
 // Layer 0: Core
 #include "tvk/core/Types.h"
+#include "tvk/core/Handle.h"
+#include "tvk/core/Result.h"
+#include "tvk/core/Assert.h"
 #include "tvk/core/Stats.h"
 #include "tvk/core/JobSystem.h"
 

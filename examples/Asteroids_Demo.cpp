@@ -1,12 +1,14 @@
 #include "tvk/TVK.h"
-#include <chrono>
-#include <thread>
-#include <cmath>
-#include <vector>
-#include <random>
-#include <cstdio>
-#include <iostream>
 #include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <random>
+#include <thread>
+#include <vector>
 
 using namespace tvk;
 
@@ -59,15 +61,12 @@ namespace sandbox {
     }
 
     tvk::Mat4 CalculateTransform(tvk::Quat rot, tvk::Vec3 pos, float scale) {
-
         tvk::Mat4 rs = tvk::QuatToMat4(rot);
-
         for(int r = 0; r < 3; ++r) {
             rs.m[r][0] *= scale;
             rs.m[r][1] *= scale;
             rs.m[r][2] *= scale;
         }
-
         rs.m[0][3] = pos.x;
         rs.m[1][3] = pos.y;
         rs.m[2][3] = pos.z;
@@ -92,7 +91,7 @@ namespace sandbox {
                 tvk::PipelineState pso;
             };
             std::vector<TempAst> temps;
-            temps.reserve(asteroidCount);
+            temps.reserve(static_cast<size_t>(asteroidCount));
 
             std::mt19937 rng(42);
             std::uniform_real_distribution<float> distPos(-fieldRadius, fieldRadius);
@@ -117,7 +116,7 @@ namespace sandbox {
                 ast.baseShade = static_cast<uint8_t>(distShade(rng));
 
                 ast.pso.cullMode = distBool(rng) ? tvk::CullMode::Back : tvk::CullMode::None;
-                ast.pso.depthOp = distBool(rng) ? tvk::DepthOp::Less : tvk::DepthOp::Always;
+                ast.pso.depthOp = tvk::DepthOp::Less;
 
                 temps.push_back(ast);
             }
@@ -128,14 +127,14 @@ namespace sandbox {
                 return a.shape < b.shape;
             });
 
-            m_Shapes.reserve(asteroidCount);
-            m_PSOs.reserve(asteroidCount);
-            m_Positions.reserve(asteroidCount);
-            m_Rotations.reserve(asteroidCount);
-            m_AngularVelocity.reserve(asteroidCount);
-            m_LinearVelocity.reserve(asteroidCount);
-            m_Scales.reserve(asteroidCount);
-            m_Shades.reserve(asteroidCount);
+            m_Shapes.reserve(static_cast<size_t>(asteroidCount));
+            m_PSOs.reserve(static_cast<size_t>(asteroidCount));
+            m_Positions.reserve(static_cast<size_t>(asteroidCount));
+            m_Rotations.reserve(static_cast<size_t>(asteroidCount));
+            m_AngularVelocity.reserve(static_cast<size_t>(asteroidCount));
+            m_LinearVelocity.reserve(static_cast<size_t>(asteroidCount));
+            m_Scales.reserve(static_cast<size_t>(asteroidCount));
+            m_Shades.reserve(static_cast<size_t>(asteroidCount));
 
             for(const auto& t : temps) {
                 m_Shapes.push_back(t.shape);
@@ -150,8 +149,7 @@ namespace sandbox {
         }
 
         void Update(float dt, float totalTime, tvk::Camera& outCamera) {
-
-            for (int i = 0; i < m_AsteroidCount; ++i) {
+            for (size_t i = 0; i < static_cast<size_t>(m_AsteroidCount); ++i) {
                 m_Positions[i].x += m_LinearVelocity[i].x * dt;
                 m_Positions[i].y += m_LinearVelocity[i].y * dt;
                 m_Positions[i].z += m_LinearVelocity[i].z * dt;
@@ -172,7 +170,6 @@ namespace sandbox {
             float camPitch = 0.2f + 0.3f * std::sin(totalTime * 0.5f);
             outCamera.Orbit(camYaw, camPitch);
             outCamera.Zoom(60.0f + 20.0f * std::sin(totalTime * 0.2f));
-            outCamera.UpdateCache();
         }
 
         void EncodeCommands(tvk::CommandBuffer& cmd) const {
@@ -181,7 +178,7 @@ namespace sandbox {
             tvk::PipelineState last_pso;
             bool pso_init = false;
 
-            for (int i = 0; i < m_AsteroidCount; ++i) {
+            for (size_t i = 0; i < static_cast<size_t>(m_AsteroidCount); ++i) {
                 if (!pso_init || m_PSOs[i].cullMode != last_pso.cullMode || m_PSOs[i].depthOp != last_pso.depthOp) {
                     cmd.BindPipeline(m_PSOs[i]);
                     last_pso = m_PSOs[i];
@@ -222,10 +219,22 @@ namespace sandbox {
 
 }
 
-int main() {
+int main(int argc, char **argv) {
+    int maxFrames = 5000;
+    bool headless = false;
+
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--frames") == 0 && i + 1 < argc) {
+            maxFrames = std::atoi(argv[++i]);
+        } else if (std::strcmp(argv[i], "--headless") == 0) {
+            headless = true;
+        }
+    }
+
     tvk::RendererDescriptor desc;
     desc.EnableAdaptiveDetail = false;
     desc.InitialQuality = tvk::QualityPreset::Balanced;
+    desc.HeadlessFallback = headless;
 
     tvk::Renderer renderer(desc);
     tvk::Camera camera;
@@ -245,7 +254,17 @@ int main() {
 
     bool updateHUD = false;
 
-    for (int frame = 0; frame < 5000; ++frame) {
+    for (int frame = 0; frame < maxFrames; ++frame) {
+        char ch = 0;
+        bool shouldQuit = false;
+        while (tvk::pal::PollKey(ch)) {
+            if (ch == 'q' || ch == 'Q' || ch == 27) {
+                shouldQuit = true;
+            }
+        }
+        if (shouldQuit)
+            break;
+
         auto currentTime = std::chrono::high_resolution_clock::now();
         float realDt = std::chrono::duration<float>(currentTime - lastTime).count();
         lastTime = currentTime;
@@ -267,17 +286,23 @@ int main() {
         };
 
         scene.Update(dt, totalTime, camera);
-
         scene.EncodeCommands(cmd);
 
         renderer.BeginFrame(camera);
         renderer.SetGlobalLight(light_pos);
         renderer.Execute(cmd);
         renderer.Present();
+        renderer.UpdateTerminalSize();
 
-        if (updateHUD && currentFps > 0) {
-            printf("\x1b[1;1H\x1b[38;2;0;255;128m[ FPS: %4d | %.2f ms | ASTEROIDS: 100 ]\x1b[0m\n", currentFps, currentMs);
-            fflush(stdout);
+        if (!headless && updateHUD && currentFps > 0) {
+            char hud[128];
+            int len = std::snprintf(
+                hud, sizeof(hud),
+                "\x1b[1;1H\x1b[38;2;0;255;128m[ FPS: %4d | %.2f ms | ASTEROIDS: 100 ]\x1b[0m",
+                currentFps, currentMs);
+            if (len > 0) {
+                tvk::pal::FastPrint(hud, static_cast<unsigned int>(len));
+            }
             updateHUD = false;
         }
 

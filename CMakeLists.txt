@@ -12,8 +12,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Build Options
 # ============================================================================
 option(TVK_BUILD_EXAMPLES "Build TVK Engine example applications" ON)
-option(TVK_BUILD_TESTS    "Build TVK Engine unit and integration tests" OFF)
+option(TVK_BUILD_TESTS    "Build TVK Engine unit and integration tests" ON)
 option(TVK_ENABLE_SIMD    "Enable AVX2/FMA SIMD acceleration on x86_64" ON)
+option(TVK_MARCH_NATIVE   "Enable host-specific -march=native optimization" OFF)
 
 # ============================================================================
 # Engine Core Library Sources (Organized by Subsystem Layer)
@@ -46,6 +47,7 @@ set(TVK_CORE_SOURCES
 
 add_library(tvk_core STATIC ${TVK_CORE_SOURCES})
 add_library(tvk::core ALIAS tvk_core)
+add_library(tvk_engine ALIAS tvk_core)
 
 target_include_directories(tvk_core
     PUBLIC
@@ -59,21 +61,32 @@ target_include_directories(tvk_core
 function(tvk_configure_target target_name)
     if(MSVC)
         target_compile_options(${target_name} PRIVATE
-            /O2 /W4
+            $<$<CONFIG:Debug>:/Od /Zi>
+            $<$<NOT:$<CONFIG:Debug>>:/O2>
+            /W4
+            /EHs-c-
             /wd4324 # structure was padded due to alignment specifier
             /wd4100 # unreferenced formal parameter
         )
-        if(TVK_ENABLE_SIMD)
-            target_compile_options(${target_name} PRIVATE /arch:AVX2)
+        target_compile_definitions(${target_name} PUBLIC _HAS_EXCEPTIONS=0)
+        if(TVK_ENABLE_SIMD AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|AMD64)")
+            target_compile_options(${target_name} PUBLIC /arch:AVX2)
+            target_compile_definitions(${target_name} PUBLIC TVK_SIMD_AVX2=1)
         endif()
     else()
         target_compile_options(${target_name} PRIVATE
-            -O3 -Wall -Wextra
+            $<$<CONFIG:Debug>:-O0 -g>
+            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>,$<STREQUAL:$<CONFIG>,>>:-O3>
+            -Wall -Wextra -Wpedantic
             -fstrict-aliasing
             -fno-exceptions
         )
         if(TVK_ENABLE_SIMD AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|AMD64|i686)")
-            target_compile_options(${target_name} PRIVATE -march=native -mavx2 -mfma)
+            target_compile_options(${target_name} PUBLIC -mavx2 -mfma)
+            target_compile_definitions(${target_name} PUBLIC TVK_SIMD_AVX2=1)
+        endif()
+        if(TVK_MARCH_NATIVE OR TVK_ENABLE_MARCH_NATIVE)
+            target_compile_options(${target_name} PRIVATE -march=native)
         endif()
 
         if(MINGW)
@@ -106,17 +119,50 @@ if(TVK_BUILD_EXAMPLES)
     add_executable(sandbox examples/Sandbox.cpp)
     target_link_libraries(sandbox PRIVATE tvk::core)
     tvk_configure_target(sandbox)
+    add_custom_command(TARGET sandbox POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:sandbox>
+            $<TARGET_FILE_DIR:sandbox>/Sandbox${CMAKE_EXECUTABLE_SUFFIX}
+    )
 
     add_executable(asteroids examples/Asteroids_Demo.cpp)
     target_link_libraries(asteroids PRIVATE tvk::core)
     tvk_configure_target(asteroids)
+    add_custom_command(TARGET asteroids POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:asteroids>
+            $<TARGET_FILE_DIR:asteroids>/Asteroids_Demo${CMAKE_EXECUTABLE_SUFFIX}
+    )
 endif()
 
 # ============================================================================
-# Tests (Phase 1+)
+# Tests (Automated Unit & Headless Verification Suite)
 # ============================================================================
 if(TVK_BUILD_TESTS)
     enable_testing()
+
+    set(TVK_TEST_LAUNCHER "")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_FLAGS MATCHES "fsanitize=thread")
+        find_program(TVK_SETARCH_BIN setarch)
+        if(TVK_SETARCH_BIN)
+            set(TVK_TEST_LAUNCHER ${TVK_SETARCH_BIN} ${CMAKE_SYSTEM_PROCESSOR} -R)
+        endif()
+    endif()
+
+    add_executable(test_core tests/test_core.cpp)
+    target_link_libraries(test_core PRIVATE tvk::core)
+    tvk_configure_target(test_core)
+    add_test(NAME test_core COMMAND ${TVK_TEST_LAUNCHER} $<TARGET_FILE:test_core>)
+
+    add_executable(test_math tests/test_math.cpp)
+    target_link_libraries(test_math PRIVATE tvk::core)
+    tvk_configure_target(test_math)
+    add_test(NAME test_math COMMAND ${TVK_TEST_LAUNCHER} $<TARGET_FILE:test_math>)
+
+    add_executable(test_renderer tests/test_renderer.cpp)
+    target_link_libraries(test_renderer PRIVATE tvk::core)
+    tvk_configure_target(test_renderer)
+    add_test(NAME test_renderer COMMAND ${TVK_TEST_LAUNCHER} $<TARGET_FILE:test_renderer>)
 endif()
 
 # ============================================================================
@@ -131,6 +177,7 @@ message(STATUS "║  Platform      : ${CMAKE_SYSTEM_NAME} (${CMAKE_SYSTEM_PROCES
 message(STATUS "║  Compiler      : ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
 message(STATUS "║  Build Type    : ${CMAKE_BUILD_TYPE}")
 message(STATUS "║  SIMD (AVX2)   : ${TVK_ENABLE_SIMD}")
+message(STATUS "║  March Native  : ${TVK_MARCH_NATIVE}")
 message(STATUS "║  Examples      : ${TVK_BUILD_EXAMPLES}")
 message(STATUS "║  Tests         : ${TVK_BUILD_TESTS}")
 message(STATUS "╚══════════════════════════════════════════════════════╝")

@@ -4,6 +4,8 @@
 #include <clocale>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <thread>
 #include <vector>
@@ -204,22 +206,33 @@ private:
 
 }
 
-int main() {
+int main(int argc, char **argv) {
   setlocale(LC_ALL, "");
+
+  int maxFrames = -1;
+  bool enableCsvLog = false;
+  bool headless = false;
+
+  for (int i = 1; i < argc; ++i) {
+    if (std::strcmp(argv[i], "--frames") == 0 && i + 1 < argc) {
+      maxFrames = std::atoi(argv[++i]);
+    } else if (std::strcmp(argv[i], "--csv") == 0) {
+      enableCsvLog = true;
+    } else if (std::strcmp(argv[i], "--headless") == 0) {
+      headless = true;
+    }
+  }
 
   tvk::RendererDescriptor desc;
   desc.EnableAdaptiveDetail = false;
   desc.InitialQuality = tvk::QualityPreset::Balanced;
-
-  tvk::pal::SetupTerminal();
+  desc.HeadlessFallback = headless;
 
   tvk::Renderer renderer(desc);
   tvk::Camera camera;
 
   renderer.ClearLights();
-
   renderer.AddLight({-100.f, 200.f, -100.f}, {255, 250, 240, 255}, 2.50f);
-
   renderer.AddLight({100.f, 50.f, 100.f}, {200, 220, 255, 255}, 0.80f);
 
   platformer::MarioScene scene;
@@ -231,12 +244,24 @@ int main() {
   tvk::CommandBuffer cmd;
   renderer.UpdateTerminalSize();
 
-  std::ofstream perf_log("perf_log.csv");
-  perf_log << "Frame,Time,FPS,VertexNs,GeometryNs,RasterNs,PresentNs,Triangles,"
-              "Culled,ArenaOverflows\n";
+  std::ofstream perf_log;
+  if (enableCsvLog) {
+    perf_log.open("perf_log.csv");
+    perf_log << "Frame,Time,FPS,VertexNs,GeometryNs,RasterNs,PresentNs,"
+                "Triangles,Culled,ArenaOverflows\n";
+  }
   int frameCount = 0;
 
   while (running) {
+    char ch = 0;
+    while (tvk::pal::PollKey(ch)) {
+      if (ch == 'q' || ch == 'Q' || ch == 27) {
+        running = false;
+      }
+    }
+    if (!running)
+      break;
+
     auto now = std::chrono::high_resolution_clock::now();
     float dt = std::chrono::duration<float>(now - lastTime).count();
     lastTime = now;
@@ -252,7 +277,7 @@ int main() {
     renderer.UpdateTerminalSize();
     totalTime += dt;
 
-    if (frameCount % 30 == 0) {
+    if (enableCsvLog && perf_log.is_open() && frameCount % 30 == 0) {
       const tvk::FrameStats &stats = renderer.GetFrameStats();
       perf_log << frameCount << "," << totalTime << ","
                << (dt > 0.0f ? (1.0f / dt) : 0.0f) << "," << stats.vertexPhaseNs
@@ -263,6 +288,10 @@ int main() {
       perf_log.flush();
     }
     frameCount++;
+
+    if (maxFrames > 0 && frameCount >= maxFrames) {
+      break;
+    }
 
     auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::high_resolution_clock::now() - now);

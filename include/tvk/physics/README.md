@@ -1,10 +1,14 @@
-# `tvk/physics` — 3D/2.5D Collision & Physics Engine
+# `include/tvk/physics` — Layer 5: 3D/2.5D Collision, Physics Solver & Mouse Picking
 
-Planned headers for physics simulation and spatial queries (see [`ROADMAP.md`](../../../ROADMAP.md) — Phase 5):
+- **Layer**: Layer 5 (`tvk/physics`)
+- **Responsibility**: 3D/2.5D collision shapes, rigid-body dynamics state, `FrameLinearArena`-backed spatial hash broadphase, analytical narrowphase contact manifold generation, 8-iteration sequential impulse solver with Baumgarte stabilization, character controller, and terminal mouse cell-to-world ray picking.
+- **Dependency Rules**: Depends on Layer 0 (`tvk/core`), Layer 2 (`tvk/math`), Layer 3 (`tvk/renderer/Camera.h`), and Layer 4 (`tvk/scene`).
+- **Technical Specification**: [`docs/specs/05_PHYSICS_AND_PICKING.md`](../../../docs/specs/05_PHYSICS_AND_PICKING.md) | [`ROADMAP.md` (Phase 5)](../../../ROADMAP.md)
 
-- `Colliders.h` — `SphereCollider`, `AABBCollider`, `OBBCollider`, `CapsuleCollider`.
-- `RigidBody.h` — `RigidBodyComponent` (mass, velocity, angular velocity, restitution, drag, kinematic/dynamic/static flags).
-- `SpatialHash.h` — Broadphase uniform spatial hash grid and dynamic AABB tree.
-- `Narrowphase.h` — GJK/EPA & analytical intersection tests (Sphere-Sphere, Sphere-AABB, Capsule-AABB, AABB-AABB) with contact manifold generation.
-- `PhysicsWorld.h` — Sequential impulse velocity/position solver, gravity, and `CharacterController`.
-- `Raycast.h` — 3D ray intersection queries and terminal mouse-cell-to-world ray picking.
+## Planned Phase 5 Headers
+- `Colliders.h` — `ColliderComponent` (`Sphere`, `AABB`, `OBB`, `Capsule`) and 16-bit collision layer/mask filtering.
+- `RigidBody.h` — `RigidBodyComponent` (`BodyType::{Static, Kinematic, Dynamic}`, mass, restitution, friction, damping, velocities, forces).
+- `SpatialHash.h` — Arena-allocated uniform `SpatialHashGrid` broadphase.
+- `Narrowphase.h` — Analytical intersection tests (`Sphere-Sphere`, `AABB-AABB`, `Sphere-AABB`, `Capsule-Sphere`, `Capsule-AABB`, `OBB-OBB`) producing `ContactManifold`.
+- `PhysicsWorld.h` — Fixed-timestep sequential impulse velocity/position solver and kinematic `CharacterController`.
+- `Raycast.h` — `ScreenCellToRay` unprojection and `PhysicsWorld::Raycast` queries.

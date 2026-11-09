@@ -24,6 +24,7 @@ namespace tvk {
 
         ProjectionType GetProjectionType() const { return m_ProjType; }
         float GetFOV() const { return m_FOV; }
+        float GetOrthoSize() const { return m_OrthoSize; }
         float GetNear() const { return m_Near; }
         float GetFar() const { return m_Far; }
 

@@ -8,11 +8,13 @@
 
 namespace tvk {
 
+#ifndef TVK_AABB_DEFINED
+#define TVK_AABB_DEFINED
     struct AABB {
         Vec3 min = { 1e38f,  1e38f,  1e38f};
         Vec3 max = {-1e38f, -1e38f, -1e38f};
 
-        bool IsValid() const { return min.x <= max.x; }
+        bool IsValid() const { return min.x <= max.x && min.y <= max.y && min.z <= max.z; }
 
         Vec3 Center()  const { return {(min.x+max.x)*0.5f, (min.y+max.y)*0.5f, (min.z+max.z)*0.5f}; }
         Vec3 Extents() const { return {(max.x-min.x)*0.5f, (max.y-min.y)*0.5f, (max.z-min.z)*0.5f}; }
@@ -22,6 +24,7 @@ namespace tvk {
             max.x = std::max(max.x, p.x); max.y = std::max(max.y, p.y); max.z = std::max(max.z, p.z);
         }
     };
+#endif
 
     struct Vertex {
         Vec3  position;

@@ -51,7 +51,7 @@ namespace tvk {
 
         void BindPipeline(const PipelineState& pso);
 
-        void DrawMesh    (const Mesh& mesh, const Mat4& transform);
+        void DrawMesh    (const Mesh& mesh, const Mat4& transform, Color color = {255, 255, 255, 255});
         void DrawSphere  (const Vec3& center, float radius, uint8_t shade);
         void DrawSphere  (const Vec3& center, float radius, Color color);
         void DrawCylinder(const Vec3& a, const Vec3& b, float radius, uint8_t shade);

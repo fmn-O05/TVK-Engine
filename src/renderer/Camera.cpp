@@ -1,14 +1,12 @@
 #include "tvk/renderer/Camera.h"
-#include "tvk/renderer/Rasterizer.h"
 #include <cmath>
 
 namespace tvk {
 
 Camera::Camera()
     : m_Yaw(0.40f), m_Pitch(0.20f), m_Distance(128.0f),
-      m_ProjType(ProjectionType::Perspective), m_FOV(70.0f)
-      ,
-      m_OrthoSize(50.0f), m_Near(NEAR_PLANE), m_Far(1000.0f), m_CustomView{},
+      m_ProjType(ProjectionType::Perspective), m_FOV(70.0f),
+      m_OrthoSize(50.0f), m_Near(4.0f), m_Far(1000.0f), m_CustomView{},
       m_UseCustomView(false) {
   UpdateCache();
 }
@@ -17,6 +15,7 @@ void Camera::Orbit(float yaw, float pitch) {
   m_Yaw = yaw;
   m_Pitch = ClampFloat(pitch, -0.70f, 0.82f);
   m_UseCustomView = false;
+  UpdateCache();
 }
 
 void Camera::Zoom(float distance) {
@@ -50,12 +49,19 @@ void Camera::SetTransform(const Mat4 &transform) {
 }
 
 void Camera::LookAt(Vec3 eye, Vec3 target, Vec3 up) {
-
+  // Left-Handed +Z forward view space convention:
+  // +X = right, +Y = up, +Z = forward (into screen).
   Vec3 f = Normalize(Sub(target, eye));
-  Vec3 r = Normalize(Cross(f, up));
-  Vec3 u = Cross(r, f);
+  Vec3 r = Cross(up, f);
+  if (LengthSq(r) <= 1e-6f) {
+    Vec3 fallbackUp =
+        (std::abs(f.y) < 0.99f) ? Vec3{0.0f, 1.0f, 0.0f} : Vec3{1.0f, 0.0f, 0.0f};
+    r = Cross(fallbackUp, f);
+  }
+  r = Normalize(r);
+  Vec3 u = Cross(f, r);
 
-  Mat4 v;
+  Mat4 v{};
   v.m[0][0] = r.x;
   v.m[0][1] = r.y;
   v.m[0][2] = r.z;
@@ -64,10 +70,10 @@ void Camera::LookAt(Vec3 eye, Vec3 target, Vec3 up) {
   v.m[1][1] = u.y;
   v.m[1][2] = u.z;
   v.m[1][3] = -Dot(u, eye);
-  v.m[2][0] = -f.x;
-  v.m[2][1] = -f.y;
-  v.m[2][2] = -f.z;
-  v.m[2][3] = Dot(f, eye);
+  v.m[2][0] = f.x;
+  v.m[2][1] = f.y;
+  v.m[2][2] = f.z;
+  v.m[2][3] = -Dot(f, eye);
   v.m[3][0] = 0.0f;
   v.m[3][1] = 0.0f;
   v.m[3][2] = 0.0f;
@@ -82,7 +88,7 @@ Mat4 Camera::GetViewMatrix() const {
     return m_CustomView;
   }
 
-  Mat4 v;
+  Mat4 v{};
   v.m[0][0] = m_CosYaw;
   v.m[0][1] = 0.0f;
   v.m[0][2] = m_SinYaw;
@@ -107,35 +113,35 @@ Mat4 Camera::GetViewMatrix() const {
 
 Mat4 Camera::GetProjectionMatrix(float aspect_ratio) const {
   Mat4 p{};
+  const float depth_range = m_Far - m_Near;
+  if (std::abs(depth_range) < 1e-6f || std::abs(aspect_ratio) < 1e-6f) {
+    return Mat4Identity();
+  }
+  const float range_inv = 1.0f / depth_range;
 
   if (m_ProjType == ProjectionType::Perspective) {
     float fov_rad = m_FOV * 3.14159265358979f / 180.0f;
     float tan_half_fov = std::tan(fov_rad * 0.5f);
 
-    if (std::abs(tan_half_fov) < 1e-6f || std::abs(aspect_ratio) < 1e-6f) {
+    if (std::abs(tan_half_fov) < 1e-6f) {
       return Mat4Identity();
     }
 
     float f = 1.0f / tan_half_fov;
 
-    float range_inv = 1.0f / (m_Far - m_Near);
-
     p.m[0][0] = f / aspect_ratio;
     p.m[1][1] = f;
-    p.m[2][2] =  (m_Far + m_Near) * range_inv;
+    p.m[2][2] = (m_Far + m_Near) * range_inv;
     p.m[2][3] = -2.0f * m_Far * m_Near * range_inv;
     p.m[3][2] = 1.0f;
-
   } else {
-
-    float half_h = m_OrthoSize;
+    float half_h = (m_OrthoSize > 1e-6f) ? m_OrthoSize : 1.0f;
     float half_w = half_h * aspect_ratio;
-    float range_inv = 1.0f / (m_Near - m_Far);
 
     p.m[0][0] = 1.0f / half_w;
     p.m[1][1] = 1.0f / half_h;
     p.m[2][2] = 2.0f * range_inv;
-    p.m[2][3] = (m_Far + m_Near) * range_inv;
+    p.m[2][3] = -(m_Far + m_Near) * range_inv;
     p.m[3][3] = 1.0f;
   }
 
@@ -145,7 +151,6 @@ Mat4 Camera::GetProjectionMatrix(float aspect_ratio) const {
 bool Camera::WorldToCamera(const Vec3 &point, float &out_x, float &out_y,
                            float &out_z) const {
   if (m_UseCustomView) {
-
     out_x = m_CustomView.m[0][0] * point.x + m_CustomView.m[0][1] * point.y +
             m_CustomView.m[0][2] * point.z + m_CustomView.m[0][3];
     out_y = m_CustomView.m[1][0] * point.x + m_CustomView.m[1][1] * point.y +
@@ -168,4 +173,4 @@ bool Camera::WorldToCamera(const Vec3 &point, float &out_x, float &out_y,
   return z2 > m_Near;
 }
 
-}
+} // namespace tvk

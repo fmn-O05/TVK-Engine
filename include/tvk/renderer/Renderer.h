@@ -14,6 +14,7 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -21,6 +22,7 @@ namespace tvk {
 
 struct RendererDescriptor {
   QualityPreset InitialQuality = QualityPreset::Balanced;
+  BlitterType Blitter = BlitterType::Braille;
   bool EnableAdaptiveDetail = true;
   bool HeadlessFallback = false;
   int FallbackWidth = 120;
@@ -58,6 +60,11 @@ public:
   void SetFog(const FogDescriptor &fog) { m_Fog = fog; }
   const FogDescriptor &GetFog() const { return m_Fog; }
 
+  void SetBlitter(BlitterType type) {
+    if (m_Presenter)
+      m_Presenter->SetBlitter(type);
+  }
+
   void BeginFrame(const Camera &camera);
   void Execute(const CommandBuffer &cmdBuffer);
   void Present();
@@ -65,17 +72,28 @@ public:
   const FrameStats &GetFrameStats() const { return m_LastFrameStats; }
   BlitterType GetActiveBlitter() const {
     return m_Presenter ? m_Presenter->GetActiveBlitter()
-                       : BlitterType::BrailleCustom;
+                       : BlitterType::Braille;
   }
   int GetTermW() const { return m_TermW; }
   int GetTermH() const { return m_TermH; }
+  int GetPixW() const { return m_PixW; }
+  int GetPixH() const { return m_PixH; }
+
+  const std::vector<TerminalCell> &GetBackBuffer() const {
+    return m_Presenter->GetBackBuffer();
+  }
+  const TerminalCell &GetCell(int x, int y) const {
+    return m_Presenter->GetBackBuffer()[static_cast<size_t>(y * m_TermW + x)];
+  }
+  const std::string &GetLastOutput() const {
+    return m_Presenter->GetLastOutput();
+  }
 
   void DrawTriangle(int worker_id, const ShadeVertex &v0, const ShadeVertex &v1,
                     const ShadeVertex &v2, const PipelineState &pso,
                     const Rect &screenBounds);
 
 private:
-
   bool m_Headless;
   int m_TermW = 0, m_TermH = 0;
   int m_PixW = 0, m_PixH = 0;
@@ -109,16 +127,16 @@ private:
   static constexpr int TILE_SIZE = 64;
 
   struct TriangleNode {
-      uint32_t tri_idx;
-      int32_t next;
+    uint32_t tri_idx;
+    int32_t next;
   };
 
   std::vector<TriangleNode> m_GlobalNodeArena;
-  uint32_t m_NodeCount = 0;
+  std::atomic<uint32_t> m_NodeCount{0};
   uint32_t m_MaxNodes = 5000000;
 
-  std::vector<int32_t> m_GlobalTileTriHeads;
-  std::vector<bool> m_TileWasDirty;
+  std::unique_ptr<std::atomic<int32_t>[]> m_GlobalTileTriHeads;
+  std::vector<uint8_t> m_TileWasDirty;
 
   struct alignas(64) SIMDWorkingBuffer {
     alignas(32) float x[1024];
@@ -136,7 +154,6 @@ private:
   };
 
   struct ThreadState {
-    std::vector<Vertex> scratch_vertices;
     SIMDWorkingBuffer simd_buffer;
   };
 
@@ -147,6 +164,7 @@ private:
     uint32_t num_vertices;
     uint32_t output_offset;
     Color albedo_override;
+    MaterialState material;
   };
 
   struct GeometryTask {
@@ -155,19 +173,21 @@ private:
     uint32_t start_tri;
     uint32_t num_tris;
     uint32_t vertex_offset;
+    uint32_t submission_order_base;
   };
 
   struct alignas(64) CacheAlignedCounter {
     uint32_t count = 0;
+    uint32_t culled = 0;
+    uint32_t rasterized = 0;
+    uint32_t active_tiles = 0;
   };
 
   std::vector<ProjectedTriangle> m_GlobalTriArena;
   std::vector<CacheAlignedCounter> m_ThreadTriArenaSizes;
+  std::vector<ProjectedLine> m_FrameLines;
 
-  std::vector<ProjectedPoint> m_GlobalPtArena;
-  std::vector<CacheAlignedCounter> m_ThreadPtArenaSizes;
-
-  uint32_t m_ArenaMaxTris, m_ArenaMaxPts;
+  uint32_t m_ArenaMaxTris;
 
   std::vector<ThreadState> m_ThreadStates;
   std::vector<ShadeVertex> m_FrameVertices;
@@ -192,14 +212,14 @@ private:
   void TransformMeshVertices(int worker_id, int cmd_idx, const Mesh &mesh,
                              const Mat4 &transform, uint32_t start_vertex,
                              uint32_t num_vertices, uint32_t output_offset,
-                             Color albedo_override);
+                             Color albedo_override,
+                             const MaterialState &material);
   void DrawMesh(int worker_id, const Mesh &mesh, const PipelineState &pso,
                 const Rect &tile, uint32_t start_tri, uint32_t num_tris,
-                uint32_t vertex_offset);
+                uint32_t vertex_offset, uint32_t submission_order_base);
 
   int m_NumWorkers = 1;
-  RasterContext
-      m_ActiveRasterCtx{};
+  RasterContext m_ActiveRasterCtx{};
 
   FrameStats m_LastFrameStats{};
   uint64_t m_FrameStartNs = 0;
@@ -208,4 +228,4 @@ private:
   uint64_t m_RasterPhaseEndNs = 0;
 };
 
-}
+} // namespace tvk
