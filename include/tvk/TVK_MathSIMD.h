@@ -6,15 +6,11 @@
 namespace tvk {
 namespace simd {
 
-    // =========================================================================
-    // Fast scalar normalize using Newton-Raphson RSQRT
-    // =========================================================================
-
     inline Vec3 NormalizeFast(Vec3 v) {
         __m128 vec  = _mm_set_ps(0.0f, v.z, v.y, v.x);
         __m128 dp   = _mm_dp_ps(vec, vec, 0x7F);
         __m128 rsq  = _mm_rsqrt_ps(dp);
-        // One NR iteration: r' = r*(1.5 - 0.5*x*r*r)
+
         __m128 half = _mm_set1_ps(0.5f);
         __m128 c32  = _mm_set1_ps(1.5f);
         rsq = _mm_mul_ps(rsq, _mm_sub_ps(c32, _mm_mul_ps(half, _mm_mul_ps(dp, _mm_mul_ps(rsq,rsq)))));
@@ -23,37 +19,23 @@ namespace simd {
         return {r[0], r[1], r[2]};
     }
 
-    // =========================================================================
-    // 8-lane helpers (AVX2)
-    // =========================================================================
-
-    /// Clamp 8 floats to [0, 1]
     inline __m256 Clamp01_8(__m256 v) {
         return _mm256_max_ps(_mm256_setzero_ps(), _mm256_min_ps(v, _mm256_set1_ps(1.0f)));
     }
 
-    /// Linear interpolate: a + t*(b-a)  for 8 lanes simultaneously
     inline __m256 Lerp8(__m256 a, __m256 b, __m256 t) {
         return _mm256_fmadd_ps(t, _mm256_sub_ps(b, a), a);
     }
 
-    // =========================================================================
-    // SoA vertex batch (for AVX2 position + normal transforms)
-    // =========================================================================
-
     struct VertexBatchSoA {
-        float* x;   ///< 32-byte aligned, padded to multiple of 8
+        float* x;
         float* y;
         float* z;
-        float* nx;  ///< Optional normal channels (may be nullptr)
+        float* nx;
         float* ny;
         float* nz;
         uint32_t count;
     };
-
-    // =========================================================================
-    // AVX2 position transform  (FMA, 8 vertices per cycle)
-    // =========================================================================
 
     inline void TransformVerticesAVX2(const VertexBatchSoA& in, VertexBatchSoA& out,
                                       const Mat4& M) {
@@ -81,11 +63,6 @@ namespace simd {
         }
     }
 
-    // =========================================================================
-    // AVX2 normal transform  (3×3 inverse-transpose, FMA, 8 normals per cycle)
-    // =========================================================================
-
-    /// it: 3×3 inverse-transpose in row-major layout [row*3+col]
     inline void TransformNormalsAVX2(const VertexBatchSoA& in, VertexBatchSoA& out,
                                      const std::array<float,9>& it) {
         __m256 n00=_mm256_set1_ps(it[0]), n01=_mm256_set1_ps(it[1]), n02=_mm256_set1_ps(it[2]);
@@ -102,10 +79,9 @@ namespace simd {
             __m256 oy = _mm256_fmadd_ps(n10,nx,_mm256_fmadd_ps(n11,ny,_mm256_mul_ps(n12,nz)));
             __m256 oz = _mm256_fmadd_ps(n20,nx,_mm256_fmadd_ps(n21,ny,_mm256_mul_ps(n22,nz)));
 
-            // Normalize each result (fast RSQRT)
             __m256 dot = _mm256_fmadd_ps(ox,ox,_mm256_fmadd_ps(oy,oy,_mm256_mul_ps(oz,oz)));
             __m256 rlen = _mm256_rsqrt_ps(dot);
-            // One Newton-Raphson pass for better precision
+
             __m256 half = _mm256_set1_ps(0.5f), c3   = _mm256_set1_ps(1.5f);
             rlen = _mm256_mul_ps(rlen, _mm256_sub_ps(c3, _mm256_mul_ps(half, _mm256_mul_ps(dot, _mm256_mul_ps(rlen, rlen)))));
 
@@ -113,7 +89,7 @@ namespace simd {
             _mm256_store_ps(&out.ny[i], _mm256_mul_ps(oy, rlen));
             _mm256_store_ps(&out.nz[i], _mm256_mul_ps(oz, rlen));
         }
-        // Tail
+
         for (; i < in.count; ++i) {
             float nx=in.nx[i], ny=in.ny[i], nz=in.nz[i];
             float ox = it[0]*nx+it[1]*ny+it[2]*nz;
@@ -125,5 +101,5 @@ namespace simd {
         }
     }
 
-} // namespace simd
-} // namespace tvk
+}
+}

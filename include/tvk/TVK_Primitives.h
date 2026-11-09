@@ -3,7 +3,7 @@
 
 namespace tvk {
     namespace primitives {
-        
+
         Mesh CreateSphere(int lat_segments, int lon_segments);
         Mesh CreateCylinder(int cyl_len, int cyl_ring);
         Mesh CreateGround(int ground_steps);
@@ -29,5 +29,5 @@ namespace tvk {
             Mesh m_SharedGround;
         };
 
-    } // namespace primitives
-} // namespace tvk
+    }
+}

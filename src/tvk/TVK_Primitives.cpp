@@ -8,9 +8,6 @@ namespace primitives {
     static constexpr float kPi  = 3.14159265359f;
     static constexpr float kTau = 6.28318530718f;
 
-    // =========================================================================
-    // Sphere  (UV-mapped)
-    // =========================================================================
     Mesh CreateSphere(int lat, int lon) {
         std::vector<Vertex>   vertices;
         std::vector<uint32_t> indices;
@@ -19,7 +16,7 @@ namespace primitives {
         for (int i = 0; i <= lat; ++i) {
             float phi    = -0.5f * kPi + (i * kPi / lat);
             float sinPhi = std::sin(phi), cosPhi = std::cos(phi);
-            float v_coord = static_cast<float>(i) / lat; // V: 0=south, 1=north
+            float v_coord = static_cast<float>(i) / lat;
 
             for (int j = 0; j <= lon; ++j) {
                 float theta  = j * kTau / lon;
@@ -41,14 +38,10 @@ namespace primitives {
         return Mesh(vertices, indices);
     }
 
-    // =========================================================================
-    // Cylinder  (UV-mapped, with end-caps)
-    // =========================================================================
     Mesh CreateCylinder(int cyl_len, int cyl_ring) {
         std::vector<Vertex>   vertices;
         std::vector<uint32_t> indices;
 
-        // ── Side wall ────────────────────────────────────────────────────────
         for (int i = 0; i <= cyl_len; ++i) {
             float y       = -0.5f + static_cast<float>(i) / cyl_len;
             float v_coord = static_cast<float>(i) / cyl_len;
@@ -71,8 +64,6 @@ namespace primitives {
             }
         }
 
-        // ── End caps ─────────────────────────────────────────────────────────
-        // Bottom cap (y = -0.5, normal pointing down)
         const uint32_t bot_center_idx = static_cast<uint32_t>(vertices.size());
         vertices.push_back({{0,-.5f,0}, {0,-1,0}, {255,255,255,255}, {0.5f, 0.5f}});
         const uint32_t bot_rim_start = static_cast<uint32_t>(vertices.size());
@@ -88,7 +79,6 @@ namespace primitives {
             indices.push_back(bot_rim_start + j);
         }
 
-        // Top cap (y = +0.5, normal pointing up)
         const uint32_t top_center_idx = static_cast<uint32_t>(vertices.size());
         vertices.push_back({{0,.5f,0}, {0,1,0}, {255,255,255,255}, {0.5f, 0.5f}});
         const uint32_t top_rim_start = static_cast<uint32_t>(vertices.size());
@@ -108,9 +98,6 @@ namespace primitives {
         return Mesh(vertices, indices);
     }
 
-    // =========================================================================
-    // Ground plane  (UV-mapped)
-    // =========================================================================
     Mesh CreateGround(int steps) {
         std::vector<Vertex>   vertices;
         std::vector<uint32_t> indices;
@@ -138,9 +125,7 @@ namespace primitives {
         }
         return Mesh(vertices, indices);
     }
-    // =========================================================================
-    // PrimitiveManager
-    // =========================================================================
+
     void PrimitiveManager::RebuildSharedMeshes() {
         m_SharedSphere   = CreateSphere(m_SphereLat, m_SphereLon);
         m_SharedCylinder = CreateCylinder(m_CylLen, m_CylRing);
@@ -149,9 +134,9 @@ namespace primitives {
 
     void PrimitiveManager::ApplyDetailProfile(float base_scale, int term_w, bool adaptive, int quality_preset) {
         float quality_scale = 1.0f;
-        if (quality_preset == 0) quality_scale = 2.0f; // Ultra
-        else if (quality_preset == 1) quality_scale = 1.0f; // Balanced
-        else if (quality_preset == 2) quality_scale = 0.55f; // Performance
+        if (quality_preset == 0) quality_scale = 2.0f;
+        else if (quality_preset == 1) quality_scale = 1.0f;
+        else if (quality_preset == 2) quality_scale = 0.55f;
 
         float eff = base_scale * quality_scale;
 
@@ -166,5 +151,5 @@ namespace primitives {
         m_CylRing     = std::max(6, static_cast<int>(18.0f * eff));
         m_GroundSteps = std::max(4, static_cast<int>(22.0f * eff));
     }
-} // namespace primitives
-} // namespace tvk
+}
+}

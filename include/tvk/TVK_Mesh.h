@@ -8,10 +8,6 @@
 
 namespace tvk {
 
-    // =========================================================================
-    // Axis-Aligned Bounding Box
-    // =========================================================================
-
     struct AABB {
         Vec3 min = { 1e38f,  1e38f,  1e38f};
         Vec3 max = {-1e38f, -1e38f, -1e38f};
@@ -27,20 +23,12 @@ namespace tvk {
         }
     };
 
-    // =========================================================================
-    // Vertex
-    // =========================================================================
-
     struct Vertex {
         Vec3  position;
         Vec3  normal;
         Color color;
-        Vec2  uv = {0.0f, 0.0f}; ///< Texture coordinate (zero-init – backward compatible)
+        Vec2  uv = {0.0f, 0.0f};
     };
-
-    // =========================================================================
-    // Mesh
-    // =========================================================================
 
     class Mesh {
     public:
@@ -57,8 +45,6 @@ namespace tvk {
 
         void Clear() { m_Vertices.clear(); m_Indices.clear(); m_AABB = {}; m_AABBDirty = false; }
 
-        /// Returns the pre-computed object-space AABB.  Recomputed lazily on first call
-        /// after SetVertices / construction.  O(n) first time, O(1) after.
         const AABB& GetAABB() const {
             if (m_AABBDirty) CacheAABB();
             return m_AABB;
@@ -77,4 +63,4 @@ namespace tvk {
         mutable bool m_AABBDirty = true;
     };
 
-} // namespace tvk
+}

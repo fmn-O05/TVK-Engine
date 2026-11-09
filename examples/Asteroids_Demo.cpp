@@ -63,17 +63,15 @@ namespace sandbox {
     }
 
     tvk::Mat4 CalculateTransform(tvk::Quat rot, tvk::Vec3 pos, float scale) {
-        // Fast Quaternion to Matrix evaluation perfectly inline
+
         tvk::Mat4 rs = tvk::QuatToMat4(rot);
-        
-        // Inline Scaling scaling rotation basis directly
+
         for(int r = 0; r < 3; ++r) {
             rs.m[r][0] *= scale;
             rs.m[r][1] *= scale;
             rs.m[r][2] *= scale;
         }
 
-        // Inline Translation offsetting seamlessly avoiding deep matrix manipulations
         rs.m[0][3] = pos.x;
         rs.m[1][3] = pos.y;
         rs.m[2][3] = pos.z;
@@ -82,7 +80,7 @@ namespace sandbox {
 
     class AsteroidFieldScene {
     public:
-        AsteroidFieldScene(int asteroidCount, float fieldRadius) 
+        AsteroidFieldScene(int asteroidCount, float fieldRadius)
             : m_FieldRadius(fieldRadius), m_AsteroidCount(asteroidCount)
         {
             m_SharedCubeMesh = CreateDemoCube();
@@ -95,7 +93,7 @@ namespace sandbox {
                 tvk::Vec3 linearVelocity;
                 float scale;
                 uint8_t baseShade;
-                tvk::PipelineState pso;  
+                tvk::PipelineState pso;
             };
             std::vector<TempAst> temps;
             temps.reserve(asteroidCount);
@@ -113,30 +111,27 @@ namespace sandbox {
                 TempAst ast;
                 ast.shape = static_cast<AsteroidShape>(distShape(rng));
                 ast.position = tvk::Vec3{distPos(rng), distPos(rng) * 0.4f, distPos(rng)};
-                
-                // Pure random quaternion baseline
+
                 tvk::Quat r = {distRot(rng), distRot(rng), distRot(rng), distRot(rng)};
                 ast.rotation = tvk::QuatNormalize(r);
-                
+
                 ast.angularVelocity = tvk::Vec3{distVel(rng), distVel(rng), distVel(rng)};
                 ast.linearVelocity = tvk::Vec3{distVel(rng) * 0.5f, distVel(rng) * 0.2f, distVel(rng) * 0.5f};
                 ast.scale = distScale(rng);
                 ast.baseShade = static_cast<uint8_t>(distShade(rng));
-                
+
                 ast.pso.cullMode = distBool(rng) ? tvk::CullMode::Back : tvk::CullMode::None;
                 ast.pso.depthOp = distBool(rng) ? tvk::DepthOp::Less : tvk::DepthOp::Always;
 
                 temps.push_back(ast);
             }
 
-            // Grouping bypasses duplicate CPU evaluation delays and reduces Batching bounds
             std::sort(temps.begin(), temps.end(), [](const TempAst& a, const TempAst& b) {
                 if (a.pso.cullMode != b.pso.cullMode) return a.pso.cullMode < b.pso.cullMode;
                 if (a.pso.depthOp != b.pso.depthOp) return a.pso.depthOp < b.pso.depthOp;
                 return a.shape < b.shape;
             });
 
-            // Commit perfectly SoA matrices for L1 isolation limits
             m_Shapes.reserve(asteroidCount);
             m_PSOs.reserve(asteroidCount);
             m_Positions.reserve(asteroidCount);
@@ -157,9 +152,9 @@ namespace sandbox {
                 m_Shades.push_back(t.baseShade);
             }
         }
-        
+
         void Update(float dt, float totalTime, tvk::Camera& outCamera) {
-            // Hot Loop Isolation: Data sequentially evaluated via strict physical lines preventing deep lookup pauses
+
             for (int i = 0; i < m_AsteroidCount; ++i) {
                 m_Positions[i].x += m_LinearVelocity[i].x * dt;
                 m_Positions[i].y += m_LinearVelocity[i].y * dt;
@@ -167,10 +162,9 @@ namespace sandbox {
 
                 m_Rotations[i] = tvk::QuatIntegrate(m_Rotations[i], m_AngularVelocity[i], dt);
 
-                // Wrap boundaries completely enforcing rendering frustums flawlessly
                 if (m_Positions[i].x > m_FieldRadius) m_Positions[i].x -= m_FieldRadius * 2.0f;
                 if (m_Positions[i].x < -m_FieldRadius) m_Positions[i].x += m_FieldRadius * 2.0f;
-                
+
                 if (m_Positions[i].y > m_FieldRadius) m_Positions[i].y -= m_FieldRadius * 2.0f;
                 if (m_Positions[i].y < -m_FieldRadius) m_Positions[i].y += m_FieldRadius * 2.0f;
 
@@ -184,11 +178,10 @@ namespace sandbox {
             outCamera.Zoom(60.0f + 20.0f * std::sin(totalTime * 0.2f));
             outCamera.UpdateCache();
         }
-        
+
         void EncodeCommands(tvk::CommandBuffer& cmd) const {
             cmd.Begin();
-            
-            // Local state to prevent sending duplicate Pipeline allocations continuously mapped per cluster bounds
+
             tvk::PipelineState last_pso;
             bool pso_init = false;
 
@@ -231,13 +224,13 @@ namespace sandbox {
         std::vector<uint8_t> m_Shades;
     };
 
-} // namespace sandbox
+}
 
 int main() {
     tvk::RendererDescriptor desc;
     desc.EnableAdaptiveDetail = false;
     desc.InitialQuality = tvk::QualityPreset::Balanced;
-    
+
     tvk::Renderer renderer(desc);
     tvk::Camera camera;
 
@@ -251,8 +244,7 @@ int main() {
     float timeAccumulator = 0.0f;
     int currentFps = 0;
     float currentMs = 0.0f;
-    
-    // Command Buffer declared exactly once intercepting continuous Heap memory reconstructions entirely!
+
     tvk::CommandBuffer cmd;
 
     bool updateHUD = false;
@@ -269,7 +261,7 @@ int main() {
             currentMs = (timeAccumulator * 1000.0f) / frames;
             frames = 0;
             timeAccumulator = 0.0f;
-            updateHUD = true;  
+            updateHUD = true;
         }
 
         tvk::Vec3 light_pos = {

@@ -27,7 +27,7 @@ void JobSystem::WorkerLoop(int worker_id) {
   uint32_t local_generation = 0;
 
   while (true) {
-    // 1. Wait for a new job phase or shutdown
+
     int spinCount = 0;
     while (m_JobGeneration.load(std::memory_order_acquire) ==
                local_generation &&
@@ -53,17 +53,14 @@ void JobSystem::WorkerLoop(int worker_id) {
       break;
     }
 
-    // Sync to the new generation
     local_generation = m_JobGeneration.load(std::memory_order_acquire);
 
-    // 2. Execute the tight loop task
     if (m_TaskCallback && m_TaskContext) {
       m_TaskCallback(worker_id, m_TaskContext);
     }
 
-    // 3. Mark thread as finished dynamically (main thread spins on this)
     m_TasksActive.fetch_sub(1, std::memory_order_acq_rel);
   }
 }
 
-} // namespace tvk
+}

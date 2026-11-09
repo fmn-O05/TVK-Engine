@@ -93,7 +93,7 @@ void TerminalPresenter::SampleBrailleCell(int r0, int r1, int r2, int r3,
   if (count == 0) {
     out_color = {0, 0, 0, 255};
   } else {
-    // Quantize to 3-bit channels (0xE0) using completely branchless fixed-point division
+
     static const uint32_t inv_cnt[9] = {0, 65536/1, 65536/2, 65536/3, 65536/4, 65536/5, 65536/6, 65536/7, 65536/8};
     uint32_t inv = inv_cnt[count];
     out_color = {static_cast<uint8_t>(((r_sum * inv) >> 16) & 0xE0),
@@ -102,40 +102,35 @@ void TerminalPresenter::SampleBrailleCell(int r0, int r1, int r2, int r3,
   }
 }
 
-// =========================================================================
-// Tiled Presentation API
-// =========================================================================
-
 void TerminalPresenter::PreFrame(int num_workers) {
   if (m_ThreadOutputs.size() != static_cast<size_t>(num_workers)) {
     m_ThreadOutputs.resize(num_workers);
   }
   for (auto& s : m_ThreadOutputs) {
     s.clear();
-    // Pre-reserve a generous tile amount of characters
+
     s.reserve(m_TermW * m_TermH * 2);
   }
 }
 
-void TerminalPresenter::SampleTileToBackBuffer(int tile_x, int tile_y, int term_w, int term_h, 
+void TerminalPresenter::SampleTileToBackBuffer(int tile_x, int tile_y, int term_w, int term_h,
                                      const Pixel* local_fb, const float* local_zb) {
-  // Tile dimensions in pixels
+
   const int TILE_SIZE = 64;
-  
-  // Terminal cell coordinates for this tile
+
   int start_tx = tile_x * (TILE_SIZE / 2);
   int start_ty = tile_y * (TILE_SIZE / 4);
   int end_tx = std::min(start_tx + (TILE_SIZE / 2), term_w);
   int end_ty = std::min(start_ty + (TILE_SIZE / 4), term_h);
-  
+
   if (start_tx >= term_w || start_ty >= term_h) return;
 
   for (int ty = start_ty; ty < end_ty; ++ty) {
     int local_ty = ty - start_ty;
-    const int row_base = local_ty * 4 * TILE_SIZE; // Address inside 64x64 cache
-    
+    const int row_base = local_ty * 4 * TILE_SIZE;
+
     for (int tx = start_tx; tx < end_tx; ++tx) {
-      const int cell_idx = ty * m_TermW + tx; // Global Terminal BackBuffer tracking
+      const int cell_idx = ty * m_TermW + tx;
       TerminalCell &back = m_BackBuffer[cell_idx];
 
       int local_tx = tx - start_tx;
@@ -165,7 +160,6 @@ void TerminalPresenter::BuildOutput(int worker_id, int start_y, int end_y, int t
   if (worker_id < 0 || worker_id >= static_cast<int>(m_ThreadOutputs.size())) return;
   std::string &local_out = m_ThreadOutputs[worker_id];
 
-  // Fast LUT mapping for numbers to string chars
   static char str_num[256][4];
   static int str_len[256];
   static bool init_lut = false;
@@ -177,7 +171,7 @@ void TerminalPresenter::BuildOutput(int worker_id, int start_y, int end_y, int t
     init_lut = true;
   }
 
-  Color current_fg = {0, 0, 0, 255}; 
+  Color current_fg = {0, 0, 0, 255};
   bool force_color = true;
 
   auto local_append_color = [&](Color c) {
@@ -236,7 +230,7 @@ void TerminalPresenter::BuildOutput(int worker_id, int start_y, int end_y, int t
         if (y != cursor_y || x != cursor_x + 1) {
           local_append_jump(x, y);
         }
-        
+
         if (back.braille_char == 0) {
           local_out.push_back(' ');
         } else {
@@ -263,7 +257,7 @@ void TerminalPresenter::FlushOutput() {
   }
 
   if (!has_any_output) {
-    return; // static frame → zero output
+    return;
   }
 
   std::string final_out;
@@ -285,7 +279,7 @@ void TerminalPresenter::FlushOutput() {
 }
 
 void TerminalPresenter::Present(const std::vector<Pixel> &, const std::vector<float> &, int, int, int) {
-  // Legacy deprecated. Do nothing.
+
 }
 
-} // namespace tvk
+}

@@ -9,12 +9,8 @@ struct Vec3 {
 };
 
 struct Mat4 {
-  float m[4][4]; // Row-major: m[row][col]
+  float m[4][4];
 };
-
-// =========================================================================
-// Scalar utilities
-// =========================================================================
 
 inline float ClampFloat(float v, float lo, float hi) {
   return std::max(lo, std::min(v, hi));
@@ -22,10 +18,6 @@ inline float ClampFloat(float v, float lo, float hi) {
 inline int ClampInt(int v, int lo, int hi) {
   return std::max(lo, std::min(v, hi));
 }
-
-// =========================================================================
-// Vec3 math
-// =========================================================================
 
 inline Vec3 Add(Vec3 a, Vec3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 inline Vec3 Sub(Vec3 a, Vec3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
@@ -46,10 +38,6 @@ inline Vec3 Normalize(Vec3 v) {
   const float inv = 1.0f / len;
   return {v.x * inv, v.y * inv, v.z * inv};
 }
-
-// =========================================================================
-// Quaternion
-// =========================================================================
 
 struct Quat {
   float x, y, z, w;
@@ -97,16 +85,11 @@ inline Mat4 QuatToMat4(Quat q) {
   return m;
 }
 
-// =========================================================================
-// Matrix math (declarations – implemented in TVK_Math.cpp)
-// =========================================================================
-
 Mat4 Mat4Identity();
 Mat4 Mat4Multiply(const Mat4 &a, const Mat4 &b);
 Mat4 Mat4Translate(Vec3 v);
 Mat4 Mat4Scale(Vec3 v);
 
-// Affine transform of a point (includes w-divide for perspective)
 inline Vec3 VectorTransform(Vec3 v, const Mat4 &mat) {
   float x =
       mat.m[0][0] * v.x + mat.m[0][1] * v.y + mat.m[0][2] * v.z + mat.m[0][3];
@@ -121,7 +104,6 @@ inline Vec3 VectorTransform(Vec3 v, const Mat4 &mat) {
   return {x, y, z};
 }
 
-// Barycentric coordinates of point P with respect to triangle ABC
 inline Vec3 Barycentric(Vec3 a, Vec3 b, Vec3 c, Vec3 p) {
   float area = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
   if (std::abs(area) < 1e-5f)
@@ -131,30 +113,17 @@ inline Vec3 Barycentric(Vec3 a, Vec3 b, Vec3 c, Vec3 p) {
   return {wa, wb, 1.0f - wa - wb};
 }
 
-// =========================================================================
-// Frustum utilities (Gribb-Hartmann extraction)
-// =========================================================================
-
-/// Extract 6 frustum planes from a combined MVP matrix.
-/// planes[i] = {a,b,c,d}: a*x + b*y + c*z + d >= 0 is INSIDE.
-/// Plane order: Left, Right, Bottom, Top, Near, Far.
 inline void ExtractFrustumPlanes(const Mat4 &mvp, float planes[6][4]) {
-  // Gribb-Hartmann extraction adapted for row-major layout.
-  // NOTE: This renderer uses a LEFT-HANDED projection (+Z forward, p.m[3][2]=+1,
-  // range_inv = 1/(near-far) < 0). In this convention the near/far sign is
-  // flipped versus standard right-handed OpenGL, so:
-  //   Near plane = row3 - row2  (NOT row3 + row2)
-  //   Far  plane = row3 + row2  (NOT row3 - row2)
-  // All lateral planes (Left/Right/Bottom/Top) are unaffected.
+
   for (int c = 0; c < 4; ++c) {
-    planes[0][c] = mvp.m[3][c] + mvp.m[0][c]; // Left
-    planes[1][c] = mvp.m[3][c] - mvp.m[0][c]; // Right
-    planes[2][c] = mvp.m[3][c] + mvp.m[1][c]; // Bottom
-    planes[3][c] = mvp.m[3][c] - mvp.m[1][c]; // Top
-    planes[4][c] = mvp.m[3][c] + mvp.m[2][c]; // Near
-    planes[5][c] = mvp.m[3][c] - mvp.m[2][c]; // Far
+    planes[0][c] = mvp.m[3][c] + mvp.m[0][c];
+    planes[1][c] = mvp.m[3][c] - mvp.m[0][c];
+    planes[2][c] = mvp.m[3][c] + mvp.m[1][c];
+    planes[3][c] = mvp.m[3][c] - mvp.m[1][c];
+    planes[4][c] = mvp.m[3][c] + mvp.m[2][c];
+    planes[5][c] = mvp.m[3][c] - mvp.m[2][c];
   }
-  // Normalise plane normals so signed-distance is in world units
+
   for (int i = 0; i < 6; ++i) {
     float len =
         std::sqrt(planes[i][0] * planes[i][0] + planes[i][1] * planes[i][1] +
@@ -169,12 +138,10 @@ inline void ExtractFrustumPlanes(const Mat4 &mvp, float planes[6][4]) {
   }
 }
 
-/// AABB vs. frustum test (conservative – never false-negatives).
-/// Returns false only when the box is provably ENTIRELY outside one plane.
 inline bool IsAABBInsideFrustum(const Vec3 &aabb_min, const Vec3 &aabb_max,
                                 const float planes[6][4]) {
   for (int i = 0; i < 6; ++i) {
-    // P-vertex: most positive point along this plane's normal
+
     float px = (planes[i][0] >= 0.0f) ? aabb_max.x : aabb_min.x;
     float py = (planes[i][1] >= 0.0f) ? aabb_max.y : aabb_min.y;
     float pz = (planes[i][2] >= 0.0f) ? aabb_max.z : aabb_min.z;
@@ -186,8 +153,6 @@ inline bool IsAABBInsideFrustum(const Vec3 &aabb_min, const Vec3 &aabb_max,
   return true;
 }
 
-/// Transform an object-space AABB by a 4×4 matrix (conservative result).
-/// Transforms all 8 corners and recomputes the enclosing AABB.
 inline void TransformAABB(const Vec3 &in_min, const Vec3 &in_max,
                           const Mat4 &mat, Vec3 &out_min, Vec3 &out_max) {
   out_min = {1e38f, 1e38f, 1e38f};
@@ -208,4 +173,4 @@ inline void TransformAABB(const Vec3 &in_min, const Vec3 &in_max,
       }
 }
 
-} // namespace tvk
+}

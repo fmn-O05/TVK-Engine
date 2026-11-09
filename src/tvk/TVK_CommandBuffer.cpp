@@ -44,7 +44,7 @@ namespace tvk {
         cmd.pso    = m_CurrentPipeline;
         cmd.a      = center;
         cmd.radius = radius;
-        cmd.shade  = color.r; // legacy field — keep aligned
+        cmd.shade  = color.r;
         cmd.color  = color;
         m_Commands.push_back(cmd);
     }
@@ -68,7 +68,7 @@ namespace tvk {
         cmd.pso    = m_CurrentPipeline;
         cmd.a = a; cmd.b = b;
         cmd.radius = radius;
-        cmd.shade  = color.r; // legacy field
+        cmd.shade  = color.r;
         cmd.color  = color;
         m_Commands.push_back(cmd);
     }
@@ -92,7 +92,7 @@ namespace tvk {
         cmd.pso    = m_CurrentPipeline;
         cmd.a = a; cmd.b = b;
         cmd.radius = radius;
-        cmd.shade  = color.r; // legacy field
+        cmd.shade  = color.r;
         cmd.color  = color;
         m_Commands.push_back(cmd);
     }
@@ -116,7 +116,7 @@ namespace tvk {
         cmd.pso   = m_CurrentPipeline;
         cmd.a     = {0.0f, y_level,      0.0f};
         cmd.b     = {0.0f, half_extent,  0.0f};
-        cmd.shade = color.r; // legacy field
+        cmd.shade = color.r;
         cmd.color = color;
         m_Commands.push_back(cmd);
     }
@@ -132,4 +132,4 @@ namespace tvk {
         m_Commands.push_back(cmd);
     }
 
-} // namespace tvk
+}

@@ -16,12 +16,11 @@ public:
     explicit NotcursesPresenter(bool headless = false);
     ~NotcursesPresenter() override;
 
-    // IPresenter Interface
     void ResizeBuffers(int new_w, int new_h) override;
     bool TryUpdateTerminalSize(int fallback_w, int fallback_h) override;
 
     void Present(const std::vector<Pixel>& framebuffer,
-                 const std::vector<float>& zbuffer, 
+                 const std::vector<float>& zbuffer,
                  int pix_w, int term_w, int term_h) override;
 
     void InvalidateFrontBuffer() override {}
@@ -38,6 +37,6 @@ private:
     int m_TermH;
 };
 
-} // namespace tvk
+}
 
-#endif // TVK_NOTCURSES_AVAILABLE
+#endif

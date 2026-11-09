@@ -4,8 +4,6 @@
 
 namespace tvk {
 
-
-
     Mat4 Mat4Identity() {
         Mat4 mat = {0};
         mat.m[0][0] = 1.0f; mat.m[1][1] = 1.0f;
@@ -43,9 +41,4 @@ namespace tvk {
         return mat;
     }
 
-
-
-
-
-
-} // namespace tvk
+}

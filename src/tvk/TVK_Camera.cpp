@@ -6,14 +6,12 @@ namespace tvk {
 
 Camera::Camera()
     : m_Yaw(0.40f), m_Pitch(0.20f), m_Distance(128.0f),
-      m_ProjType(ProjectionType::Perspective), m_FOV(70.0f) // degrees
+      m_ProjType(ProjectionType::Perspective), m_FOV(70.0f)
       ,
       m_OrthoSize(50.0f), m_Near(NEAR_PLANE), m_Far(1000.0f), m_CustomView{},
       m_UseCustomView(false) {
   UpdateCache();
 }
-
-// === Legacy Orbit API ===
 
 void Camera::Orbit(float yaw, float pitch) {
   m_Yaw = yaw;
@@ -31,8 +29,6 @@ void Camera::UpdateCache() {
   m_CosPitch = std::cos(m_Pitch);
   m_SinPitch = std::sin(m_Pitch);
 }
-
-// === New General-Purpose API ===
 
 void Camera::SetPerspective(float fov_deg, float near_plane, float far_plane) {
   m_ProjType = ProjectionType::Perspective;
@@ -54,7 +50,7 @@ void Camera::SetTransform(const Mat4 &transform) {
 }
 
 void Camera::LookAt(Vec3 eye, Vec3 target, Vec3 up) {
-  // Compute forward, right, up basis vectors
+
   Vec3 f = Normalize(Sub(target, eye));
   Vec3 r = Normalize(Cross(f, up));
   Vec3 u = Cross(r, f);
@@ -81,14 +77,11 @@ void Camera::LookAt(Vec3 eye, Vec3 target, Vec3 up) {
   m_UseCustomView = true;
 }
 
-// === Pipeline Transformations ===
-
 Mat4 Camera::GetViewMatrix() const {
   if (m_UseCustomView) {
     return m_CustomView;
   }
 
-  // Legacy orbit view matrix
   Mat4 v;
   v.m[0][0] = m_CosYaw;
   v.m[0][1] = 0.0f;
@@ -124,20 +117,17 @@ Mat4 Camera::GetProjectionMatrix(float aspect_ratio) const {
     }
 
     float f = 1.0f / tan_half_fov;
-    // range_inv = 1/(far-near): positive, giving a correct left-handed projection
-    // where near → NDC_z = -1  and  far → NDC_z = +1.
-    // Previously used 1/(near-far) which was NEGATIVE, corrupting
-    // the frustum planes extracted from VP (all geometry was mis-culled).
+
     float range_inv = 1.0f / (m_Far - m_Near);
 
     p.m[0][0] = f / aspect_ratio;
     p.m[1][1] = f;
-    p.m[2][2] =  (m_Far + m_Near) * range_inv;   // positive ≈ +1.008
-    p.m[2][3] = -2.0f * m_Far * m_Near * range_inv; // negative ≈ -8.032
+    p.m[2][2] =  (m_Far + m_Near) * range_inv;
+    p.m[2][3] = -2.0f * m_Far * m_Near * range_inv;
     p.m[3][2] = 1.0f;
-    // p.m[3][3] = 0.0f (already zeroed)
+
   } else {
-    // Orthographic
+
     float half_h = m_OrthoSize;
     float half_w = half_h * aspect_ratio;
     float range_inv = 1.0f / (m_Near - m_Far);
@@ -155,7 +145,7 @@ Mat4 Camera::GetProjectionMatrix(float aspect_ratio) const {
 bool Camera::WorldToCamera(const Vec3 &point, float &out_x, float &out_y,
                            float &out_z) const {
   if (m_UseCustomView) {
-    // Use the custom view matrix directly
+
     out_x = m_CustomView.m[0][0] * point.x + m_CustomView.m[0][1] * point.y +
             m_CustomView.m[0][2] * point.z + m_CustomView.m[0][3];
     out_y = m_CustomView.m[1][0] * point.x + m_CustomView.m[1][1] * point.y +
@@ -165,7 +155,6 @@ bool Camera::WorldToCamera(const Vec3 &point, float &out_x, float &out_y,
     return out_z > m_Near;
   }
 
-  // Legacy orbit transform
   const float x1 = m_CosYaw * point.x + m_SinYaw * point.z;
   const float z1 = -m_SinYaw * point.x + m_CosYaw * point.z;
 
@@ -179,4 +168,4 @@ bool Camera::WorldToCamera(const Vec3 &point, float &out_x, float &out_y,
   return z2 > m_Near;
 }
 
-} // namespace tvk
+}

@@ -7,9 +7,6 @@
 namespace tvk {
 class JobSystem;
 
-// =========================================================================
-// IPresenter — abstract terminal output interface
-// =========================================================================
 struct IPresenter {
   virtual void ResizeBuffers(int new_w, int new_h) = 0;
   virtual bool TryUpdateTerminalSize(int fallback_w, int fallback_h) = 0;
@@ -17,7 +14,7 @@ struct IPresenter {
                        const std::vector<float> &zbuffer, int pix_w, int term_w,
                        int term_h) = 0;
   virtual void PreFrame(int num_workers) = 0;
-  virtual void SampleTileToBackBuffer(int tile_x, int tile_y, int term_w, int term_h, 
+  virtual void SampleTileToBackBuffer(int tile_x, int tile_y, int term_w, int term_h,
                                       const Pixel* local_fb, const float* local_zb) = 0;
   virtual void BuildOutput(int worker_id, int start_y, int end_y, int term_w) = 0;
   virtual void FlushOutput() = 0;
@@ -31,9 +28,6 @@ struct IPresenter {
   virtual ~IPresenter() = default;
 };
 
-// =========================================================================
-// TerminalCell
-// =========================================================================
 struct TerminalCell {
   uint8_t braille_char;
   Color fg_color;
@@ -43,9 +37,6 @@ struct TerminalCell {
   }
 };
 
-// =========================================================================
-// TerminalPresenter — HIGH-RES OPTIMIZED (1920x1080 ready)
-// =========================================================================
 class TerminalPresenter : public IPresenter {
 public:
   explicit TerminalPresenter(bool headless);
@@ -53,14 +44,13 @@ public:
 
   void ResizeBuffers(int new_w, int new_h) override;
   bool TryUpdateTerminalSize(int fw, int fh) override;
-  // Old global present (still required by IPresenter, can be a no-op or kept for fallback)
+
   void Present(const std::vector<Pixel> &framebuffer,
                const std::vector<float> &zbuffer, int pix_w, int term_w,
                int term_h) override;
 
-  // Tiled Deferred API
   void PreFrame(int num_workers);
-  void SampleTileToBackBuffer(int tile_x, int tile_y, int term_w, int term_h, 
+  void SampleTileToBackBuffer(int tile_x, int tile_y, int term_w, int term_h,
                               const Pixel* local_fb, const float* local_zb);
   void BuildOutput(int worker_id, int start_y, int end_y, int term_w);
   void FlushOutput();
@@ -93,7 +83,7 @@ private:
   int m_HudRows = 0;
   std::vector<TerminalCell> m_FrontBuffer;
   std::vector<TerminalCell> m_BackBuffer;
-  
+
   std::vector<std::string> m_ThreadOutputs;
 
   Color m_CurrentForeground;
@@ -102,4 +92,4 @@ private:
   JobSystem *m_JobSystem = nullptr;
 };
 
-} // namespace tvk
+}

@@ -9,17 +9,13 @@
 
 namespace tvk {
 
-// =========================================================================
-// Construction / Destruction
-// =========================================================================
-
 Renderer::Renderer(const RendererDescriptor &desc)
     : m_Headless(desc.HeadlessFallback), m_FallbackW(desc.FallbackWidth),
       m_FallbackH(desc.FallbackHeight), m_QualityPreset(desc.InitialQuality),
       m_EnableAdaptiveDetail(desc.EnableAdaptiveDetail), m_NumLights(0),
       m_ArenaMaxTris(desc.MaxTrisPerThread),
       m_ArenaMaxPts(desc.MaxPtsPerThread) {
-  // ── Presenter selection ──────────────────────────────────────────────
+
 #ifdef TVK_NOTCURSES_AVAILABLE
   if (desc.UseNotcurses) {
     m_Presenter = std::make_unique<NotcursesPresenter>(desc.HeadlessFallback);
@@ -30,41 +26,30 @@ Renderer::Renderer(const RendererDescriptor &desc)
   m_Presenter = std::make_unique<TerminalPresenter>(desc.HeadlessFallback);
 #endif
 
-  // ── Job system ───────────────────────────────────────────────────────
   const int num_workers =
       std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
   m_JobSystem = std::make_unique<JobSystem>(num_workers);
   m_NumWorkers = num_workers;
 
-  // Inject the job system into the presenter
   m_Presenter->SetJobSystem(m_JobSystem.get());
 
-  // ── Per-thread state ─────────────────────────────────────────────────
   m_ThreadStates.resize(num_workers);
   m_ThreadTriArenaSizes.resize(num_workers);
   m_ThreadPtArenaSizes.resize(num_workers);
 
-  // Allocate arena storage
   m_GlobalTriArena.resize(static_cast<size_t>(m_ArenaMaxTris) * num_workers);
   m_GlobalPtArena.resize(static_cast<size_t>(m_ArenaMaxPts) * num_workers);
 
-  // ── Default light ────────────────────────────────────────────────────
   m_Lights[0] = {{20.0f, 30.0f, -10.0f}, {255, 255, 255, 255}, 1.0f};
   m_NumLights = 1;
 
-  // ── Shared primitive meshes ───────────────────────────────────────────
   m_PrimitiveManager.ApplyDetailProfile(1.0f, m_TermW, m_EnableAdaptiveDetail, static_cast<int>(m_QualityPreset));
   m_PrimitiveManager.RebuildSharedMeshes();
 
-  // ── First terminal size detection ─────────────────────────────────────
   UpdateTerminalSize();
 }
 
 Renderer::~Renderer() = default;
-
-// =========================================================================
-// Light management
-// =========================================================================
 
 void Renderer::AddLight(const Vec3 &pos, Color col, float intensity) {
   if (m_NumLights >= kMaxLights)
@@ -72,22 +57,17 @@ void Renderer::AddLight(const Vec3 &pos, Color col, float intensity) {
   m_Lights[m_NumLights++] = {pos, col, intensity};
 }
 
-// =========================================================================
-// Terminal / buffer management
-// =========================================================================
-
 void Renderer::UpdateTerminalSize() {
-  // Let presenter sync its internal state (notcurses reads from its own API)
+
   m_Presenter->TryUpdateTerminalSize(m_FallbackW, m_FallbackH);
 
-  // Use PAL as authoritative size source (consistent across both backends)
   int nw = 0, nh = 0;
   if (!pal::TryGetTerminalSize(nw, nh)) {
     if (m_TermW == 0) {
       nw = m_FallbackW;
       nh = m_FallbackH;
     } else
-      return; // keep current
+      return;
   }
   if (nw == m_TermW && nh == m_TermH && m_PixW > 0)
     return;
@@ -105,7 +85,7 @@ void Renderer::ResizeBuffers(int nw, int nh) {
   m_TileCols = (m_PixW + TILE_SIZE - 1) / TILE_SIZE;
   m_TileRows = (m_PixH + TILE_SIZE - 1) / TILE_SIZE;
   m_TotalTiles = m_TileCols * m_TileRows;
-  
+
   m_GlobalTileTriHeads.assign(m_TotalTiles, -1);
   m_TileWasDirty.assign(m_TotalTiles, false);
   m_GlobalNodeArena.resize(m_MaxNodes);
@@ -115,18 +95,6 @@ void Renderer::ResizeBuffers(int nw, int nh) {
   m_PrimitiveManager.ApplyDetailProfile(1.0f, m_TermW, m_EnableAdaptiveDetail, static_cast<int>(m_QualityPreset));
   m_PrimitiveManager.RebuildSharedMeshes();
 }
-
-
-
-// =========================================================================
-// Tile grid (Removed)
-// =========================================================================
-
-// (CalculateTileGrid removed)
-
-// =========================================================================
-// BeginFrame
-// =========================================================================
 
 void Renderer::BeginFrame(const Camera &camera) {
   m_FrameStartNs = pal::GetTimestampNs();
@@ -141,13 +109,11 @@ void Renderer::BeginFrame(const Camera &camera) {
     std::fill(m_GlobalTileTriHeads.begin(), m_GlobalTileTriHeads.end(), -1);
   }
 
-  // Reset arena counters
   for (auto &c : m_ThreadTriArenaSizes)
     c.count = 0;
   for (auto &c : m_ThreadPtArenaSizes)
     c.count = 0;
 
-  // Transform lights to view space for vertex shader
   const Mat4 view = camera.GetViewMatrix();
   for (int i = 0; i < m_NumLights; ++i) {
     m_ViewLights[i].position = VectorTransform(m_Lights[i].position, view);
@@ -155,10 +121,6 @@ void Renderer::BeginFrame(const Camera &camera) {
     m_ViewLights[i].intensity = m_Lights[i].intensity;
   }
 }
-
-// =========================================================================
-// Execute — build tasks + run all three phases
-// =========================================================================
 
 void Renderer::Execute(const CommandBuffer &cmdBuffer) {
   if (!m_CameraPtr || m_PixW == 0)
@@ -171,7 +133,6 @@ void Renderer::Execute(const CommandBuffer &cmdBuffer) {
   m_ProjectionMatrix = m_CameraPtr->GetProjectionMatrix(aspect);
   m_Viewport = {m_PixW * 0.5f, m_PixH * 0.5f, 0.0f, 0.0f};
 
-  // Extract frustum planes from the combined VP matrix
   const Mat4 view = m_CameraPtr->GetViewMatrix();
   const Mat4 vp = Mat4Multiply(m_ProjectionMatrix, view);
   ExtractFrustumPlanes(vp, m_FrustumPlanes);
@@ -182,24 +143,21 @@ void Renderer::Execute(const CommandBuffer &cmdBuffer) {
 
   const int num_workers = m_NumWorkers;
 
-  // ── VERTEX PHASE ────────────────────────────────────────────────────
   uint64_t t0 = pal::GetTimestampNs();
   m_VertexQueue.Reset(static_cast<int>(m_VertexTasks.size()));
   m_JobSystem->Execute([this](int wid) { ExecuteVertexPhase(wid); });
   m_VertexPhaseEndNs = pal::GetTimestampNs();
   m_LastFrameStats.vertexPhaseNs = m_VertexPhaseEndNs - t0;
 
-  // ── GEOMETRY PHASE ──────────────────────────────────────────────────
   t0 = pal::GetTimestampNs();
   m_GeoQueue.Reset(static_cast<int>(m_GeoTasks.size()));
   m_JobSystem->Execute([this](int wid) { ExecuteGeometryPhase(wid); });
   m_GeoPhaseEndNs = pal::GetTimestampNs();
   m_LastFrameStats.geometryPhaseNs = m_GeoPhaseEndNs - t0;
 
-  // ── RASTER AND PRESENT PHASE (Tiled Immediate-Mode) ─────────────────────────
   t0 = pal::GetTimestampNs();
   m_Presenter->PreFrame(num_workers);
-  
+
   m_RasterQueue.Reset(m_TotalTiles);
 
   m_ActiveRasterCtx.framebuffer = nullptr;
@@ -224,26 +182,20 @@ void Renderer::Execute(const CommandBuffer &cmdBuffer) {
   m_RasterPhaseEndNs = pal::GetTimestampNs();
   m_LastFrameStats.rasterPhaseNs = m_RasterPhaseEndNs - t0;
 
-  // ── GENERATE ANSI PASS (Linear String Builder) ─────────────────────────
   t0 = pal::GetTimestampNs();
-  m_JobSystem->Execute([this](int wid) { 
+  m_JobSystem->Execute([this](int wid) {
       int rows_per_worker = (m_TermH + m_NumWorkers - 1) / m_NumWorkers;
       int start_y = wid * rows_per_worker;
       int end_y = std::min(start_y + rows_per_worker, m_TermH);
       m_Presenter->BuildOutput(wid, start_y, end_y, m_TermW);
   });
 
-  // Accumulate arena overflow count
   for (int i = 0; i < m_NumWorkers; ++i) {
-    // Overflow = arena fully exhausted (detected by reaching max)
+
     if (m_ThreadTriArenaSizes[i].count >= m_ArenaMaxTris)
       ++m_LastFrameStats.arenaOverflows;
   }
 }
-
-// =========================================================================
-// Present
-// =========================================================================
 
 void Renderer::Present() {
   const uint64_t t0 = pal::GetTimestampNs();
@@ -252,10 +204,6 @@ void Renderer::Present() {
   m_LastFrameStats.presentNs = t1 - t0;
   m_LastFrameStats.frameTimeNs = t1 - m_FrameStartNs;
 }
-
-// =========================================================================
-// BuildRenderTasks — issue VertexTask + GeometryTask per command
-// =========================================================================
 
 void Renderer::BuildRenderTasks(const CommandBuffer &cmdBuffer) {
   const auto &cmds = cmdBuffer.GetCommands();
@@ -270,7 +218,6 @@ void Renderer::BuildRenderTasks(const CommandBuffer &cmdBuffer) {
   for (int i = 0; i < static_cast<int>(cmds.size()); ++i) {
     const RenderCommand &cmd = cmds[i];
 
-    // ── Build transform for this command ────────────────────────────
     Mat4 model;
     const Mesh *mesh_ptr = nullptr;
     Color albedo = cmd.color;
@@ -284,7 +231,7 @@ void Renderer::BuildRenderTasks(const CommandBuffer &cmdBuffer) {
       mesh_ptr = &m_PrimitiveManager.GetSphere();
     } else if (cmd.type == CommandType::DrawCylinder) {
       Vec3 axis = Normalize(
-          Sub(cmd.b, cmd.a)); // reserved for oriented cylinder transform
+          Sub(cmd.b, cmd.a));
       (void)axis;
       Vec3 mid = {(cmd.a.x + cmd.b.x) * 0.5f, (cmd.a.y + cmd.b.y) * 0.5f,
                   (cmd.a.z + cmd.b.z) * 0.5f};
@@ -307,10 +254,9 @@ void Renderer::BuildRenderTasks(const CommandBuffer &cmdBuffer) {
           Mat4Identity());
       mesh_ptr = &m_PrimitiveManager.GetGround();
     } else {
-      continue; // DrawLine and others handled separately (future)
+      continue;
     }
 
-    // ── AABB frustum cull ──────────────────────────────────────────
     if (mesh_ptr) {
       const AABB &obj_aabb = mesh_ptr->GetAABB();
       if (obj_aabb.IsValid()) {
@@ -323,17 +269,13 @@ void Renderer::BuildRenderTasks(const CommandBuffer &cmdBuffer) {
       }
     }
 
-    // ── Fused (view*model) transform ───────────────────────────────
     const Mat4 fused = Mat4Multiply(view, model);
     m_FrameFusedTransforms.push_back(fused);
 
-    // 3×3 inverse-transpose for normal transform
-    // For uniform-scale transforms: transpose of upper-left 3×3 of fused
-    // 3×3 inverse-transpose for normal transform
     std::array<float, 9> nt;
     for (int r = 0; r < 3; ++r) {
       for (int c = 0; c < 3; ++c) {
-        // لا تقم بعكس الصفوف والأعمدة هنا!
+
         nt[r * 3 + c] = fused.m[r][c];
       }
     }
@@ -342,7 +284,6 @@ void Renderer::BuildRenderTasks(const CommandBuffer &cmdBuffer) {
     const int transform_idx =
         static_cast<int>(m_FrameFusedTransforms.size()) - 1;
 
-    // ── Vertex task ────────────────────────────────────────────────
     const uint32_t nv = static_cast<uint32_t>(mesh_ptr->GetVertices().size());
     VertexTask vt;
     vt.mesh = mesh_ptr;
@@ -353,7 +294,6 @@ void Renderer::BuildRenderTasks(const CommandBuffer &cmdBuffer) {
     vt.albedo_override = albedo;
     m_VertexTasks.push_back(vt);
 
-    // ── Geometry task ──────────────────────────────────────────────
     const uint32_t nt2 =
         static_cast<uint32_t>(mesh_ptr->GetIndices().size() / 3);
     GeometryTask gt;
@@ -364,7 +304,6 @@ void Renderer::BuildRenderTasks(const CommandBuffer &cmdBuffer) {
     gt.vertex_offset = vertex_cursor;
     m_GeoTasks.push_back(gt);
 
-    // Ensure frame vertices buffer is large enough
     if (vertex_cursor + nv > m_FrameVertices.size())
       m_FrameVertices.resize(vertex_cursor + nv);
     vertex_cursor += nv;
@@ -372,10 +311,6 @@ void Renderer::BuildRenderTasks(const CommandBuffer &cmdBuffer) {
     m_LastFrameStats.trianglesSubmitted += nt2;
   }
 }
-
-// =========================================================================
-// Vertex phase — parallel transform of all meshes
-// =========================================================================
 
 void Renderer::ExecuteVertexPhase(int worker_id) {
   const int total = static_cast<int>(m_VertexTasks.size());
@@ -390,11 +325,6 @@ void Renderer::ExecuteVertexPhase(int worker_id) {
                           t.albedo_override);
   }
 }
-
-// =========================================================================
-// TransformMeshVertices — vertex shader (SIMD positions, AVX2 normals,
-//                         multi-light Gouraud + specular half-vector)
-// =========================================================================
 
 void Renderer::TransformMeshVertices(int worker_id, int cmd_idx,
                                      const Mesh &mesh, const Mat4 &fused,
@@ -411,7 +341,6 @@ void Renderer::TransformMeshVertices(int worker_id, int cmd_idx,
   for (uint32_t base = start_vertex; base < end_vertex; base += BATCH) {
     const uint32_t count = std::min(BATCH, end_vertex - base);
 
-    // ── Gather SoA ─────────────────────────────────────────────────
     for (uint32_t k = 0; k < count; ++k) {
       const Vertex &v = verts[base + k];
       sb.x[k] = v.position.x;
@@ -422,17 +351,14 @@ void Renderer::TransformMeshVertices(int worker_id, int cmd_idx,
       sb.nz[k] = v.normal.z;
     }
 
-    // ── Transform positions (AVX2) ─────────────────────────────────
     simd::VertexBatchSoA in_soa{sb.x, sb.y, sb.z, sb.nx, sb.ny, sb.nz, count};
     simd::VertexBatchSoA out_soa{sb.out_x,  sb.out_y,  sb.out_z, sb.out_nx,
                                  sb.out_ny, sb.out_nz, count};
     simd::TransformVerticesAVX2(in_soa, out_soa, fused);
 
-    // ── Transform normals (AVX2) ───────────────────────────────────
     const auto &nt = m_FrameNormalTransforms[cmd_idx];
     simd::TransformNormalsAVX2(in_soa, out_soa, nt);
 
-    // ── Scatter back + lighting per vertex ─────────────────────────
     for (uint32_t k = 0; k < count; ++k) {
       ShadeVertex &sv =
           m_FrameVertices[output_offset + base - start_vertex + k];
@@ -442,12 +368,11 @@ void Renderer::TransformMeshVertices(int worker_id, int cmd_idx,
       sv.color = albedo_override;
       sv.base_shade = albedo_override.r;
 
-      // ── Multi-light diffuse accumulation ───────────────────────
       float total_ndotl = 0.0f;
       for (int li = 0; li < m_NumLights; ++li) {
         Vec3 L = Normalize(Sub(m_ViewLights[li].position, sv.position));
         float nl = std::max(0.0f, Dot(sv.normal, L));
-        // Weight by luminance of light colour
+
         float lum = (m_ViewLights[li].color.r * 0.2126f +
                      m_ViewLights[li].color.g * 0.7152f +
                      m_ViewLights[li].color.b * 0.0722f) /
@@ -456,10 +381,9 @@ void Renderer::TransformMeshVertices(int worker_id, int cmd_idx,
       }
       sv.ndotl = std::min(1.0f, total_ndotl);
 
-      // ── Specular half-vector (primary light) ───────────────────
       if (m_NumLights > 0) {
         Vec3 L = Normalize(Sub(m_ViewLights[0].position, sv.position));
-        // V = normalize(-position): view direction in view space
+
         Vec3 V = Normalize({-sv.position.x, -sv.position.y, -sv.position.z});
         Vec3 H = Normalize(Add(L, V));
         sv.nDotH = std::max(0.0f, Dot(sv.normal, H));
@@ -470,10 +394,6 @@ void Renderer::TransformMeshVertices(int worker_id, int cmd_idx,
     }
   }
 }
-
-// =========================================================================
-// Geometry phase — clip + project + bin triangles to tiles
-// =========================================================================
 
 void Renderer::ExecuteGeometryPhase(int worker_id) {
   const int total = static_cast<int>(m_GeoTasks.size());
@@ -488,7 +408,7 @@ void Renderer::ExecuteGeometryPhase(int worker_id) {
 }
 
 void Renderer::DrawMesh(int worker_id, const Mesh &mesh,
-                        const PipelineState &pso, const Rect & /*tile*/,
+                        const PipelineState &pso, const Rect & ,
                         uint32_t start_tri, uint32_t num_tris,
                         uint32_t vertex_offset) {
   const auto &indices = mesh.GetIndices();
@@ -514,12 +434,11 @@ void Renderer::DrawMesh(int worker_id, const Mesh &mesh,
       Rasterizer::RasterizeProjectedTriangle(
           worker_id, clipped[ci], pso, m_ProjectionMatrix, m_Viewport, m_PixW,
           m_PixH, tri_arr, tri_sz, m_ArenaMaxTris);
-      
-      // If triangle was successfully appended, bin it into intersecting tiles
+
       if (tri_sz > old_sz) {
         uint32_t global_tri_idx = worker_id * m_ArenaMaxTris + old_sz;
         const ProjectedTriangle& pt = tri_arr[old_sz];
-        
+
         int min_tx = std::max(0, pt.bounding_box.min_x / TILE_SIZE);
         int max_tx = std::min(m_TileCols - 1, pt.bounding_box.max_x / TILE_SIZE);
         int min_ty = std::max(0, pt.bounding_box.min_y / TILE_SIZE);
@@ -549,15 +468,15 @@ void Renderer::DrawMesh(int worker_id, const Mesh &mesh,
         for (int b_ty = min_ty; b_ty <= max_ty; ++b_ty) {
           int t_min_y = b_ty * TILE_SIZE;
           int t_max_y = t_min_y + TILE_SIZE - 1;
-          
+
           for (int b_tx = min_tx; b_tx <= max_tx; ++b_tx) {
             int t_min_x = b_tx * TILE_SIZE;
             int t_max_x = t_min_x + TILE_SIZE - 1;
-            
-            if (reject(t_min_x, t_min_y, t_max_x, t_max_y, p0x, p0y, dx01, dy01) || 
-                reject(t_min_x, t_min_y, t_max_x, t_max_y, p1x, p1y, dx12, dy12) || 
+
+            if (reject(t_min_x, t_min_y, t_max_x, t_max_y, p0x, p0y, dx01, dy01) ||
+                reject(t_min_x, t_min_y, t_max_x, t_max_y, p1x, p1y, dx12, dy12) ||
                 reject(t_min_x, t_min_y, t_max_x, t_max_y, p2x, p2y, dx20, dy20)) {
-               continue; 
+               continue;
             }
 
             int tile_idx = b_ty * m_TileCols + b_tx;
@@ -578,11 +497,7 @@ void Renderer::DrawMesh(int worker_id, const Mesh &mesh,
   }
 }
 
-// =========================================================================
-// Raster phase — Tiled Immediate-Mode (L1 Cache Bounded)
-// =========================================================================
-
-void Renderer::ExecuteRasterPhase(int worker_id) {
+void Renderer::ExecuteRasterPhase(int) {
   int total_tiles = m_TotalTiles;
 
   alignas(64) Pixel local_fb[TILE_SIZE * TILE_SIZE];
@@ -598,62 +513,51 @@ void Renderer::ExecuteRasterPhase(int worker_id) {
 
     int32_t node_idx = m_GlobalTileTriHeads[tile_idx];
 
-    // Dirty Rect Culling: Absolute zero processing for empty stable tiles.
     if (node_idx == -1 && !m_TileWasDirty[tile_idx]) {
       continue;
     }
 
-    // Only zero depth cache (Terminal Presenter tests Z <= 0.0f, rendering fb useless to clear)
     std::memset(local_zb, 0, sizeof(local_zb));
 
     if (node_idx != -1) {
-      // Phase 1: Sort geometry front-to-back (highest 1/z first) to maximize early-Z rejection later
+
       int32_t head = node_idx;
-      
-      // Extract into a small fast array for sorting
-      // (Linked lists are slow to sort, arrays are cache-friendly)
-      constexpr int MAX_NODES_PER_TILE = 4096; // typical empirical limit
+
+      constexpr int MAX_NODES_PER_TILE = 4096;
       int32_t sort_array[MAX_NODES_PER_TILE];
       int num_nodes = 0;
-      
+
       while (head != -1 && num_nodes < MAX_NODES_PER_TILE) {
           sort_array[num_nodes++] = head;
           head = m_GlobalNodeArena[head].next;
       }
-      
-      // Sort in descending order of max_inv_z (front-to-back)
+
       std::sort(&sort_array[0], &sort_array[num_nodes], [&](int32_t a, int32_t b) {
           float za = m_GlobalTriArena[m_GlobalNodeArena[a].tri_idx].max_inv_z;
           float zb = m_GlobalTriArena[m_GlobalNodeArena[b].tri_idx].max_inv_z;
-          return za > zb; 
+          return za > zb;
       });
 
-      // Process sorted array of geometry nodes
       for (int i = 0; i < num_nodes; ++i) {
         int32_t n = sort_array[i];
         TriangleNode& node = m_GlobalNodeArena[n];
-        Rasterizer::ProcessTileBand(m_ActiveRasterCtx, m_GlobalTriArena[node.tri_idx], 
+        Rasterizer::ProcessTileBand(m_ActiveRasterCtx, m_GlobalTriArena[node.tri_idx],
                                     tile_x, tile_y, local_fb, local_zb, TILE_SIZE);
       }
       m_TileWasDirty[tile_idx] = true;
     } else {
-      // Tile had geometry last frame, now empty. Must pass zeros to force terminal to output spaces.
+
       m_TileWasDirty[tile_idx] = false;
     }
 
-    // Immediately present the tile from L1 cache
     m_Presenter->SampleTileToBackBuffer(tile_x, tile_y, m_TermW, m_TermH, local_fb, local_zb);
   }
 }
 
-// =========================================================================
-// DrawTriangle — direct triangle submit (used by inline geometry helpers)
-// =========================================================================
-
 void Renderer::DrawTriangle(int worker_id, const ShadeVertex &v0,
                             const ShadeVertex &v1, const ShadeVertex &v2,
                             const PipelineState &pso,
-                            const Rect & /*screenBounds*/) {
+                            const Rect & ) {
   const ShadeVertex raw[3] = {v0, v1, v2};
   ShadeVertex clipped[2][3];
   const int n = Rasterizer::ClipAgainstNearPlane(raw, clipped);
@@ -666,7 +570,7 @@ void Renderer::DrawTriangle(int worker_id, const ShadeVertex &v0,
     Rasterizer::RasterizeProjectedTriangle(
         worker_id, clipped[ci], pso, m_ProjectionMatrix, m_Viewport, m_PixW,
         m_PixH, ta, tri_sz, m_ArenaMaxTris);
-        
+
     if (tri_sz > old_sz) {
       uint32_t global_tri_idx = worker_id * m_ArenaMaxTris + old_sz;
       const ProjectedTriangle& pt = ta[old_sz];
@@ -703,11 +607,11 @@ void Renderer::DrawTriangle(int worker_id, const ShadeVertex &v0,
         for (int b_tx = min_tx; b_tx <= max_tx; ++b_tx) {
           int t_min_x = b_tx * TILE_SIZE;
           int t_max_x = t_min_x + TILE_SIZE - 1;
-          
-          if (reject(t_min_x, t_min_y, t_max_x, t_max_y, p0x, p0y, dx01, dy01) || 
-              reject(t_min_x, t_min_y, t_max_x, t_max_y, p1x, p1y, dx12, dy12) || 
+
+          if (reject(t_min_x, t_min_y, t_max_x, t_max_y, p0x, p0y, dx01, dy01) ||
+              reject(t_min_x, t_min_y, t_max_x, t_max_y, p1x, p1y, dx12, dy12) ||
               reject(t_min_x, t_min_y, t_max_x, t_max_y, p2x, p2y, dx20, dy20)) {
-             continue; 
+             continue;
           }
 
           int tile_idx = b_ty * m_TileCols + b_tx;
@@ -727,4 +631,4 @@ void Renderer::DrawTriangle(int worker_id, const ShadeVertex &v0,
   }
 }
 
-} // namespace tvk
+}
