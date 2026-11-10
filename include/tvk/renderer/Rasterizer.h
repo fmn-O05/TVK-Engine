@@ -49,6 +49,9 @@ struct ProjectedTriangle {
   float col_g[3];
   float col_b[3];
 
+  float uv_u[3]; // u / z
+  float uv_v[3]; // v / z
+
   Color albedo;
   float ambient;
   float diffuse;
@@ -61,6 +64,9 @@ struct ProjectedTriangle {
   float dr_dx, dr_dy;
   float dg_dx, dg_dy;
   float db_dx, db_dy;
+
+  float du_dx, du_dy;
+  float dv_dx, dv_dy;
 
   float max_inv_z;
 

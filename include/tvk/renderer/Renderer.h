@@ -36,11 +36,7 @@ struct RendererDescriptor {
   FogDescriptor Fog;
 };
 
-struct PointLight {
-  Vec3 position = {0.0f, 100.0f, 0.0f};
-  Color color = {255, 255, 255, 255};
-  float intensity = 1.0f;
-};
+using PointLight = Light;
 
 class Renderer {
 public:
@@ -50,12 +46,42 @@ public:
   void UpdateTerminalSize();
 
   void SetGlobalLight(const Vec3 &pos) {
-    m_Lights[0] = {pos, {255, 255, 255, 255}, 1.0f};
-    m_NumLights = std::max(m_NumLights, 1);
+    Light l;
+    l.type = LightType::Point;
+    l.position = pos;
+    l.color = {255, 255, 255, 255};
+    l.intensity = 1.0f;
+    SetLight(0, l);
   }
+
+  void SetLight(const Light &light) {
+    SetLight(0, light);
+  }
+
+  void SetLight(int index, const Light &light) {
+    if (index >= 0 && index < kMaxLights) {
+      m_Lights[index] = light;
+      m_NumLights = std::max(m_NumLights, index + 1);
+    }
+  }
+
+  void SetPointLight(const Vec3 &pos, Color col = {255, 255, 255, 255},
+                     float intensity = 1.0f) {
+    Light l;
+    l.type = LightType::Point;
+    l.position = pos;
+    l.color = col;
+    l.intensity = intensity;
+    SetLight(0, l);
+  }
+
+  void AddLight(const Light &light);
   void AddLight(const Vec3 &pos, Color col = {255, 255, 255, 255},
                 float intensity = 1.0f);
   void ClearLights() { m_NumLights = 0; }
+
+  int GetNumLights() const { return m_NumLights; }
+  const Light &GetLight(int index) const { return m_Lights[index]; }
 
   void SetFog(const FogDescriptor &fog) { m_Fog = fog; }
   const FogDescriptor &GetFog() const { return m_Fog; }
@@ -109,9 +135,9 @@ private:
   ViewportTransform m_Viewport{};
   float m_FrustumPlanes[6][4]{};
 
-  static constexpr int kMaxLights = 4;
-  PointLight m_Lights[kMaxLights];
-  PointLight m_ViewLights[kMaxLights];
+  static constexpr int kMaxLights = 8;
+  Light m_Lights[kMaxLights];
+  Light m_ViewLights[kMaxLights];
   int m_NumLights = 0;
 
   FogDescriptor m_Fog;

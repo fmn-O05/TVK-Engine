@@ -335,6 +335,9 @@ void Rasterizer::RasterizeProjectedTriangle(
         0.0f, 255.0f);
   }
 
+  float vu[3] = {view_verts[0].uv.u, view_verts[1].uv.u, view_verts[2].uv.u};
+  float vv[3] = {view_verts[0].uv.v, view_verts[1].uv.v, view_verts[2].uv.v};
+
   if (area < 0.0f) {
     std::swap(pt.p1, pt.p2);
     std::swap(pt.ooz[1], pt.ooz[2]);
@@ -343,6 +346,8 @@ void Rasterizer::RasterizeProjectedTriangle(
     std::swap(vr[1], vr[2]);
     std::swap(vg[1], vg[2]);
     std::swap(vb[1], vb[2]);
+    std::swap(vu[1], vu[2]);
+    std::swap(vv[1], vv[2]);
   }
 
   int32_t p0x = static_cast<int32_t>(std::round(pt.p0.x - 0.5f));
@@ -389,6 +394,8 @@ void Rasterizer::RasterizeProjectedTriangle(
     pt.col_r[i] = vr[i] * pt.ooz[i];
     pt.col_g[i] = vg[i] * pt.ooz[i];
     pt.col_b[i] = vb[i] * pt.ooz[i];
+    pt.uv_u[i] = vu[i] * pt.ooz[i];
+    pt.uv_v[i] = vv[i] * pt.ooz[i];
   }
   pt.dr_dx = (dx12 * pt.col_r[0] + dx20 * pt.col_r[1] + dx01 * pt.col_r[2]) *
              pt.inv_area;
@@ -401,6 +408,15 @@ void Rasterizer::RasterizeProjectedTriangle(
   pt.db_dx = (dx12 * pt.col_b[0] + dx20 * pt.col_b[1] + dx01 * pt.col_b[2]) *
              pt.inv_area;
   pt.db_dy = (dy12 * pt.col_b[0] + dy20 * pt.col_b[1] + dy01 * pt.col_b[2]) *
+             pt.inv_area;
+
+  pt.du_dx = (dx12 * pt.uv_u[0] + dx20 * pt.uv_u[1] + dx01 * pt.uv_u[2]) *
+             pt.inv_area;
+  pt.du_dy = (dy12 * pt.uv_u[0] + dy20 * pt.uv_u[1] + dy01 * pt.uv_u[2]) *
+             pt.inv_area;
+  pt.dv_dx = (dx12 * pt.uv_v[0] + dx20 * pt.uv_v[1] + dx01 * pt.uv_v[2]) *
+             pt.inv_area;
+  pt.dv_dy = (dy12 * pt.uv_v[0] + dy20 * pt.uv_v[1] + dy01 * pt.uv_v[2]) *
              pt.inv_area;
 
   pt.albedo = view_verts[0].color;
@@ -541,6 +557,10 @@ void ProcessTileBandImpl(const RasterContext &ctx, const ProjectedTriangle &tri,
                   (py - p0y) * tri.dg_dy;
     float b_row = tri.col_b[0] + (aligned_min_x - p0x) * tri.db_dx +
                   (py - p0y) * tri.db_dy;
+    float u_row = tri.uv_u[0] + (aligned_min_x - p0x) * tri.du_dx +
+                  (py - p0y) * tri.du_dy;
+    float v_row = tri.uv_v[0] + (aligned_min_x - p0x) * tri.dv_dx +
+                  (py - p0y) * tri.dv_dy;
 
     __m256 v_vooz_base = _mm256_add_ps(
         _mm256_set1_ps(vooz_row),
@@ -554,11 +574,19 @@ void ProcessTileBandImpl(const RasterContext &ctx, const ProjectedTriangle &tri,
     __m256 v_b_base = _mm256_add_ps(
         _mm256_set1_ps(b_row),
         _mm256_mul_ps(v_ramp, _mm256_set1_ps(tri.db_dx)));
+    __m256 v_u_base = _mm256_add_ps(
+        _mm256_set1_ps(u_row),
+        _mm256_mul_ps(v_ramp, _mm256_set1_ps(tri.du_dx)));
+    __m256 v_v_base = _mm256_add_ps(
+        _mm256_set1_ps(v_row),
+        _mm256_mul_ps(v_ramp, _mm256_set1_ps(tri.dv_dx)));
 
     const __m256 v_dz_dx_8 = _mm256_set1_ps(tri.dz_dx * 8.0f);
     const __m256 v_dr_dx_8 = _mm256_set1_ps(tri.dr_dx * 8.0f);
     const __m256 v_dg_dx_8 = _mm256_set1_ps(tri.dg_dx * 8.0f);
     const __m256 v_db_dx_8 = _mm256_set1_ps(tri.db_dx * 8.0f);
+    const __m256 v_du_dx_8 = _mm256_set1_ps(tri.du_dx * 8.0f);
+    const __m256 v_dv_dx_8 = _mm256_set1_ps(tri.dv_dx * 8.0f);
 
     for (int px = aligned_min_x; px <= scan_max_x; px += 8,
              ve01 = _mm256_add_epi32(ve01, v_dx01),
@@ -567,7 +595,9 @@ void ProcessTileBandImpl(const RasterContext &ctx, const ProjectedTriangle &tri,
              v_vooz_base = _mm256_add_ps(v_vooz_base, v_dz_dx_8),
              v_r_base = _mm256_add_ps(v_r_base, v_dr_dx_8),
              v_g_base = _mm256_add_ps(v_g_base, v_dg_dx_8),
-             v_b_base = _mm256_add_ps(v_b_base, v_db_dx_8)) {
+             v_b_base = _mm256_add_ps(v_b_base, v_db_dx_8),
+             v_u_base = _mm256_add_ps(v_u_base, v_du_dx_8),
+             v_v_base = _mm256_add_ps(v_v_base, v_dv_dx_8)) {
       const __m256i mask_i = _mm256_and_si256(
           _mm256_and_si256(_mm256_cmpgt_epi32(ve01, v_minus_one),
                            _mm256_cmpgt_epi32(ve12, v_minus_one)),
@@ -610,6 +640,11 @@ void ProcessTileBandImpl(const RasterContext &ctx, const ProjectedTriangle &tri,
       __m256 v_r = _mm256_mul_ps(v_r_base, v_inv_vooz);
       __m256 v_g = _mm256_mul_ps(v_g_base, v_inv_vooz);
       __m256 v_b = _mm256_mul_ps(v_b_base, v_inv_vooz);
+
+      [[maybe_unused]] const __m256 v_u = _mm256_mul_ps(v_u_base, v_inv_vooz);
+      [[maybe_unused]] const __m256 v_v = _mm256_mul_ps(v_v_base, v_inv_vooz);
+      (void)v_u;
+      (void)v_v;
 
       if constexpr (FogEnabled) {
         __m256 v_vz = v_inv_vooz;
@@ -659,11 +694,16 @@ void ProcessTileBandImpl(const RasterContext &ctx, const ProjectedTriangle &tri,
         tri.col_g[0] + (scan_min_x - p0x) * tri.dg_dx + (py - p0y) * tri.dg_dy;
     float b_oz =
         tri.col_b[0] + (scan_min_x - p0x) * tri.db_dx + (py - p0y) * tri.db_dy;
+    float u_oz =
+        tri.uv_u[0] + (scan_min_x - p0x) * tri.du_dx + (py - p0y) * tri.du_dy;
+    float v_oz =
+        tri.uv_v[0] + (scan_min_x - p0x) * tri.dv_dx + (py - p0y) * tri.dv_dy;
 
     const int strict_end = std::min(scan_max_x, x1);
     for (int px = scan_min_x; px <= strict_end; ++px, e01 += dx01, e12 += dx12,
              e20 += dx20, vooz += tri.dz_dx, r_oz += tri.dr_dx,
-             g_oz += tri.dg_dx, b_oz += tri.db_dx) {
+             g_oz += tri.dg_dx, b_oz += tri.db_dx,
+             u_oz += tri.du_dx, v_oz += tri.dv_dx) {
       if (e01 < 0 || e12 < 0 || e20 < 0)
         continue;
 
@@ -673,14 +713,18 @@ void ProcessTileBandImpl(const RasterContext &ctx, const ProjectedTriangle &tri,
           continue;
       }
 
-      const float inv_vooz = 1.0f / std::max(vooz, 1e-6f);
-      float r = r_oz * inv_vooz;
-      float g = g_oz * inv_vooz;
-      float b = b_oz * inv_vooz;
+      const float z = 1.0f / std::max(vooz, 1e-6f);
+      float r = r_oz * z;
+      float g = g_oz * z;
+      float b = b_oz * z;
+      [[maybe_unused]] const float u = u_oz * z;
+      [[maybe_unused]] const float v = v_oz * z;
+      (void)u;
+      (void)v;
 
       if constexpr (FogEnabled) {
         const float fog_t = ClampFloat(
-            (inv_vooz - ctx.fog_start) * ctx.fog_inv_range, 0.0f, 1.0f);
+            (z - ctx.fog_start) * ctx.fog_inv_range, 0.0f, 1.0f);
         r += fog_t * (ctx.fog_r - r);
         g += fog_t * (ctx.fog_g - g);
         b += fog_t * (ctx.fog_b - b);

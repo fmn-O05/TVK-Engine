@@ -173,4 +173,78 @@ TVK_TEST(SIMD_ZeroNormalMaskingAndScalarParity) {
   }
 }
 
+TVK_TEST(Mat4Invert_AnalyticalAdjugateAndSingularities) {
+  // 1. Identity matrix inversion
+  Mat4 I = Mat4Identity();
+  Mat4 invI{};
+  TVK_EXPECT_TRUE(Mat4Invert(I, invI));
+  for (int r = 0; r < 4; ++r) {
+    for (int c = 0; c < 4; ++c) {
+      float expected = (r == c) ? 1.0f : 0.0f;
+      TVK_EXPECT_NEAR(invI.m[r][c], expected, 1e-6f);
+    }
+  }
+
+  // 2. Combined affine matrix (Translate * Rotate * Scale)
+  Mat4 T = Mat4Translate({3.5f, -7.2f, 15.0f});
+  Mat4 S = Mat4Scale({2.0f, 0.5f, 4.0f});
+  Mat4 R = QuatToMat4(QuatNormalize({0.3f, -0.2f, 0.5f, 0.8f}));
+  Mat4 M = Mat4Multiply(T, Mat4Multiply(R, S));
+  Mat4 invM{};
+  TVK_EXPECT_TRUE(Mat4Invert(M, invM));
+
+  // Verify M * invM == Identity
+  Mat4 prod = Mat4Multiply(M, invM);
+  for (int r = 0; r < 4; ++r) {
+    for (int c = 0; c < 4; ++c) {
+      float expected = (r == c) ? 1.0f : 0.0f;
+      TVK_EXPECT_NEAR(prod.m[r][c], expected, 1e-4f);
+    }
+  }
+
+  // Verify invM * M == Identity
+  Mat4 prodRev = Mat4Multiply(invM, M);
+  for (int r = 0; r < 4; ++r) {
+    for (int c = 0; c < 4; ++c) {
+      float expected = (r == c) ? 1.0f : 0.0f;
+      TVK_EXPECT_NEAR(prodRev.m[r][c], expected, 1e-4f);
+    }
+  }
+
+  // 3. Singularity: Zero matrix det = 0 -> returns false, sets outInv = Identity
+  Mat4 zeroMat{};
+  Mat4 outZero{};
+  TVK_EXPECT_FALSE(Mat4Invert(zeroMat, outZero));
+  for (int r = 0; r < 4; ++r) {
+    for (int c = 0; c < 4; ++c) {
+      float expected = (r == c) ? 1.0f : 0.0f;
+      TVK_EXPECT_NEAR(outZero.m[r][c], expected, 1e-6f);
+    }
+  }
+
+  // 4. Near-singularity: det <= 1e-8 -> returns false, sets outInv = Identity
+  Mat4 nearSing = Mat4Identity();
+  nearSing.m[0][0] = 1e-5f;
+  nearSing.m[1][1] = 1e-5f; // det = 1e-10 <= 1e-8
+  Mat4 outNearSing{};
+  TVK_EXPECT_FALSE(Mat4Invert(nearSing, outNearSing));
+  for (int r = 0; r < 4; ++r) {
+    for (int c = 0; c < 4; ++c) {
+      float expected = (r == c) ? 1.0f : 0.0f;
+      TVK_EXPECT_NEAR(outNearSing.m[r][c], expected, 1e-6f);
+    }
+  }
+
+  // 5. In-place aliasing: Mat4Invert(M, M)
+  Mat4 M_alias = M;
+  TVK_EXPECT_TRUE(Mat4Invert(M_alias, M_alias));
+  Mat4 prodAlias = Mat4Multiply(M, M_alias);
+  for (int r = 0; r < 4; ++r) {
+    for (int c = 0; c < 4; ++c) {
+      float expected = (r == c) ? 1.0f : 0.0f;
+      TVK_EXPECT_NEAR(prodAlias.m[r][c], expected, 1e-4f);
+    }
+  }
+}
+
 int main() { return TVK_RUN_ALL_TESTS(); }

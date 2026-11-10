@@ -8,6 +8,11 @@ namespace tvk {
         Mesh CreateCylinder(int cyl_len, int cyl_ring);
         Mesh CreateGround(int ground_steps);
 
+        Mesh CreateBox(float width = 1.0f, float height = 1.0f, float depth = 1.0f, Color color = {255, 255, 255, 255});
+        Mesh CreateCone(float radius = 1.0f, float height = 2.0f, int segments = 24, Color color = {255, 255, 255, 255});
+        Mesh CreateTorus(float majorRadius = 1.0f, float minorRadius = 0.3f, int majorSegments = 24, int minorSegments = 16, Color color = {255, 255, 255, 255});
+        Mesh CreatePlane(float width = 10.0f, float depth = 10.0f, int gridX = 10, int gridZ = 10, Color color = {255, 255, 255, 255});
+
         class PrimitiveManager {
         public:
             void ApplyDetailProfile(float base_scale, int term_w, bool adaptive, int quality_preset);

@@ -143,6 +143,7 @@ Mat4 Mat4Identity();
 Mat4 Mat4Multiply(const Mat4 &a, const Mat4 &b);
 Mat4 Mat4Translate(Vec3 v);
 Mat4 Mat4Scale(Vec3 v);
+bool Mat4Invert(const Mat4 &m, Mat4 &outInv);
 
 inline Vec3 Mat3Transform(const Mat3 &mat, Vec3 v) {
   return {

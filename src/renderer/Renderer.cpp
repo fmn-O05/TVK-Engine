@@ -8,6 +8,154 @@
 
 namespace tvk {
 
+namespace {
+
+struct ShadingResult {
+  Vec3 diff_rgb{0.0f, 0.0f, 0.0f};
+  Vec3 spec_rgb{0.0f, 0.0f, 0.0f};
+  float total_ndotl = 0.0f;
+  float max_ndoth = 0.0f;
+};
+
+inline ShadingResult ComputeLighting(const Vec3 &pos, const Vec3 &normal,
+                                     const Vec3 &V,
+                                     const MaterialState &material,
+                                     const Light *viewLights, int numLights) {
+  ShadingResult res;
+  if (material.shadingModel == ShadingModel::Unlit) {
+    const float target_dr =
+        (material.diffuse > 1e-4f)
+            ? ((1.0f - material.ambient) / material.diffuse)
+            : 1.0f;
+    res.diff_rgb = {target_dr, target_dr, target_dr};
+    res.spec_rgb = {0.0f, 0.0f, 0.0f};
+    res.total_ndotl = 1.0f;
+    res.max_ndoth = 0.0f;
+    return res;
+  }
+
+  const Vec3 N = (LengthSq(normal) > 1e-6f) ? Normalize(normal) : Vec3{0.0f, 1.0f, 0.0f};
+  const Vec3 viewDir = (LengthSq(V) > 1e-6f) ? Normalize(V) : Vec3{0.0f, 0.0f, -1.0f};
+  const float shininess = std::max(1.0f, material.shininess);
+  const int toonSteps = std::max(1, material.toonSteps);
+
+  for (int li = 0; li < numLights; ++li) {
+    const Light &light = viewLights[li];
+    if (light.intensity <= 0.0f)
+      continue;
+
+    Vec3 L{0.0f, 1.0f, 0.0f};
+    float attenuation = 1.0f;
+
+    if (light.type == LightType::Directional) {
+      Vec3 dir = light.direction;
+      if (LengthSq(dir) < 1e-6f)
+        dir = {0.0f, -1.0f, 0.0f};
+      L = Normalize({-dir.x, -dir.y, -dir.z});
+      attenuation = 1.0f;
+    } else {
+      const Vec3 toLight = Sub(light.position, pos);
+      const float distSq = LengthSq(toLight);
+      const float d = std::sqrt(distSq);
+
+      if (d > light.range)
+        continue;
+
+      L = (d > 1e-6f) ? Mul(toLight, 1.0f / d) : Vec3{0.0f, 1.0f, 0.0f};
+
+      const float denom = light.attenConstant + light.attenLinear * d +
+                          light.attenQuadratic * distSq;
+      attenuation = 1.0f / std::max(1e-6f, denom);
+
+      if (light.type == LightType::Spot) {
+        Vec3 spotDir = (LengthSq(light.direction) > 1e-6f)
+                           ? Normalize(light.direction)
+                           : Vec3{0.0f, -1.0f, 0.0f};
+        const float cosTheta = -Dot(L, spotDir);
+        float inner = light.spotInnerCutoff;
+        float outer = light.spotOuterCutoff;
+        if (inner < outer)
+          std::swap(inner, outer);
+        if (inner - outer < 1e-5f)
+          inner = outer + 1e-5f;
+
+        if (cosTheta <= outer) {
+          continue;
+        } else if (cosTheta < inner) {
+          const float s = std::clamp((cosTheta - outer) / (inner - outer), 0.0f, 1.0f);
+          const float spotFactor = s * s * (3.0f - 2.0f * s);
+          attenuation *= spotFactor;
+        }
+      }
+    }
+
+    if (attenuation <= 0.0f)
+      continue;
+
+    const float nl = std::max(0.0f, Dot(N, L));
+
+    const float eff_intensity = light.intensity * attenuation;
+    const float lr = (light.color.r / 255.0f) * eff_intensity;
+    const float lg = (light.color.g / 255.0f) * eff_intensity;
+    const float lb = (light.color.b / 255.0f) * eff_intensity;
+
+    const float lum =
+        (light.color.r * 0.2126f + light.color.g * 0.7152f +
+         light.color.b * 0.0722f) /
+        255.0f;
+
+    float diff_factor = nl;
+    float spec_factor = 0.0f;
+
+    if (material.shadingModel == ShadingModel::Toon) {
+      const float steps = static_cast<float>(toonSteps);
+      diff_factor = std::floor(nl * steps) / steps;
+      if (nl >= 1.0f)
+        diff_factor = 1.0f;
+
+      const Vec3 H = Normalize(Add(L, viewDir));
+      const float nh = std::max(0.0f, Dot(N, H));
+      res.max_ndoth = std::max(res.max_ndoth, nh);
+      if (nh > 0.0f) {
+        const float sp_raw = std::pow(nh, shininess);
+        spec_factor = (sp_raw >= material.toonSpecularThreshold) ? 1.0f : 0.0f;
+      }
+    } else if (material.shadingModel == ShadingModel::Gouraud) {
+      if (nl > 0.0f) {
+        const Vec3 R = Normalize(Sub(Mul(N, 2.0f * nl), L));
+        const float rv = std::max(0.0f, Dot(R, viewDir));
+        if (rv > 0.0f) {
+          spec_factor = std::pow(rv, shininess);
+        }
+      }
+      const Vec3 H = Normalize(Add(L, viewDir));
+      res.max_ndoth = std::max(res.max_ndoth, std::max(0.0f, Dot(N, H)));
+    } else {
+      // BlinnPhong (and Flat)
+      const Vec3 H = Normalize(Add(L, viewDir));
+      const float nh = std::max(0.0f, Dot(N, H));
+      res.max_ndoth = std::max(res.max_ndoth, nh);
+      if (nh > 0.0f) {
+        spec_factor = std::pow(nh, shininess);
+      }
+    }
+
+    res.total_ndotl += diff_factor * eff_intensity * lum;
+
+    res.diff_rgb.x += diff_factor * lr;
+    res.diff_rgb.y += diff_factor * lg;
+    res.diff_rgb.z += diff_factor * lb;
+
+    res.spec_rgb.x += spec_factor * lr;
+    res.spec_rgb.y += spec_factor * lg;
+    res.spec_rgb.z += spec_factor * lb;
+  }
+
+  return res;
+}
+
+} // namespace
+
 Renderer::Renderer(const RendererDescriptor &desc)
     : m_Headless(desc.HeadlessFallback), m_FallbackW(desc.FallbackWidth),
       m_FallbackH(desc.FallbackHeight), m_QualityPreset(desc.InitialQuality),
@@ -33,7 +181,12 @@ Renderer::Renderer(const RendererDescriptor &desc)
   m_GlobalTriArena.resize(static_cast<size_t>(m_ArenaMaxTris) *
                           static_cast<size_t>(num_workers));
 
-  m_Lights[0] = {{20.0f, 30.0f, -10.0f}, {255, 255, 255, 255}, 1.0f};
+  Light default_light;
+  default_light.type = LightType::Point;
+  default_light.position = {20.0f, 30.0f, -10.0f};
+  default_light.color = {255, 255, 255, 255};
+  default_light.intensity = 1.0f;
+  m_Lights[0] = default_light;
   m_NumLights = 1;
 
   m_PrimitiveManager.ApplyDetailProfile(
@@ -45,10 +198,21 @@ Renderer::Renderer(const RendererDescriptor &desc)
 
 Renderer::~Renderer() = default;
 
+void Renderer::AddLight(const Light &light) {
+  if (m_NumLights >= kMaxLights)
+    return;
+  m_Lights[m_NumLights++] = light;
+}
+
 void Renderer::AddLight(const Vec3 &pos, Color col, float intensity) {
   if (m_NumLights >= kMaxLights)
     return;
-  m_Lights[m_NumLights++] = {pos, col, intensity};
+  Light l;
+  l.type = LightType::Point;
+  l.position = pos;
+  l.color = col;
+  l.intensity = intensity;
+  m_Lights[m_NumLights++] = l;
 }
 
 void Renderer::UpdateTerminalSize() {
@@ -124,9 +288,17 @@ void Renderer::BeginFrame(const Camera &camera) {
 
   const Mat4 view = camera.GetViewMatrix();
   for (int i = 0; i < m_NumLights; ++i) {
+    m_ViewLights[i] = m_Lights[i];
     m_ViewLights[i].position = VectorTransform(m_Lights[i].position, view);
-    m_ViewLights[i].color = m_Lights[i].color;
-    m_ViewLights[i].intensity = m_Lights[i].intensity;
+
+    Vec3 dir = m_Lights[i].direction;
+    if (LengthSq(dir) < 1e-6f) {
+      dir = {0.0f, -1.0f, 0.0f};
+    }
+    const float dx = view.m[0][0] * dir.x + view.m[0][1] * dir.y + view.m[0][2] * dir.z;
+    const float dy = view.m[1][0] * dir.x + view.m[1][1] * dir.y + view.m[1][2] * dir.z;
+    const float dz = view.m[2][0] * dir.x + view.m[2][1] * dir.y + view.m[2][2] * dir.z;
+    m_ViewLights[i].direction = Normalize({dx, dy, dz});
   }
 }
 
@@ -390,7 +562,6 @@ void Renderer::TransformMeshVertices(int worker_id, int cmd_idx,
 
   constexpr uint32_t BATCH = 1024;
   const uint32_t end_vertex = start_vertex + num_vertices;
-  const float shininess = std::max(1.0f, material.shininess);
 
   for (uint32_t base = start_vertex; base < end_vertex; base += BATCH) {
     const uint32_t count = std::min(BATCH, end_vertex - base);
@@ -423,50 +594,25 @@ void Renderer::TransformMeshVertices(int worker_id, int cmd_idx,
       sv.color = Color::Modulate(src_v.color, albedo_override);
       sv.base_shade = sv.color.r;
 
-      const Vec3 V =
-          Normalize({-sv.position.x, -sv.position.y, -sv.position.z});
-
-      float diff_r = 0.0f, diff_g = 0.0f, diff_b = 0.0f;
-      float spec_r = 0.0f, spec_g = 0.0f, spec_b = 0.0f;
-      float total_ndotl = 0.0f;
-      float max_ndoth = 0.0f;
-
-      for (int li = 0; li < m_NumLights; ++li) {
-        const PointLight &light = m_ViewLights[li];
-        const Vec3 L = Normalize(Sub(light.position, sv.position));
-        const float nl = std::max(0.0f, Dot(sv.normal, L));
-
-        const float lr = (light.color.r / 255.0f) * light.intensity;
-        const float lg = (light.color.g / 255.0f) * light.intensity;
-        const float lb = (light.color.b / 255.0f) * light.intensity;
-
-        diff_r += nl * lr;
-        diff_g += nl * lg;
-        diff_b += nl * lb;
-
-        const float lum =
-            (light.color.r * 0.2126f + light.color.g * 0.7152f +
-             light.color.b * 0.0722f) /
-            255.0f;
-        total_ndotl += nl * light.intensity * lum;
-
-        const Vec3 H = Normalize(Add(L, V));
-        const float nh = std::max(0.0f, Dot(sv.normal, H));
-        max_ndoth = std::max(max_ndoth, nh);
-        if (nh > 0.0f) {
-          const float sp = std::pow(nh, shininess);
-          spec_r += sp * lr;
-          spec_g += sp * lg;
-          spec_b += sp * lb;
-        }
-      }
-
-      sv.ndotl = std::min(1.0f, total_ndotl);
-      sv.nDotH = max_ndoth;
-      sv.diff_rgb = {diff_r, diff_g, diff_b};
-      sv.spec_rgb = {spec_r, spec_g, spec_b};
       sv.has_rgb_light = true;
       sv.uv = src_v.uv;
+
+      if (material.shadingModel == ShadingModel::Flat) {
+        sv.diff_rgb = {0.0f, 0.0f, 0.0f};
+        sv.spec_rgb = {0.0f, 0.0f, 0.0f};
+        sv.ndotl = 0.0f;
+        sv.nDotH = 0.0f;
+      } else {
+        const Vec3 V =
+            Normalize({-sv.position.x, -sv.position.y, -sv.position.z});
+        const ShadingResult lightRes =
+            ComputeLighting(sv.position, sv.normal, V, material,
+                            m_ViewLights, m_NumLights);
+        sv.ndotl = std::min(1.0f, lightRes.total_ndotl);
+        sv.nDotH = lightRes.max_ndoth;
+        sv.diff_rgb = lightRes.diff_rgb;
+        sv.spec_rgb = lightRes.spec_rgb;
+      }
     }
   }
 }
@@ -504,9 +650,40 @@ void Renderer::DrawMesh(int worker_id, const Mesh &mesh,
     const uint32_t i1 = indices[ti * 3 + 1];
     const uint32_t i2 = indices[ti * 3 + 2];
 
-    const ShadeVertex raw_verts[3] = {m_FrameVertices[vertex_offset + i0],
-                                      m_FrameVertices[vertex_offset + i1],
-                                      m_FrameVertices[vertex_offset + i2]};
+    ShadeVertex raw_verts[3] = {m_FrameVertices[vertex_offset + i0],
+                                m_FrameVertices[vertex_offset + i1],
+                                m_FrameVertices[vertex_offset + i2]};
+
+    const auto &mesh_verts = mesh.GetVertices();
+    if (i0 < mesh_verts.size() && i1 < mesh_verts.size() && i2 < mesh_verts.size()) {
+      raw_verts[0].uv = mesh_verts[i0].uv;
+      raw_verts[1].uv = mesh_verts[i1].uv;
+      raw_verts[2].uv = mesh_verts[i2].uv;
+    }
+
+    if (pso.material.shadingModel == ShadingModel::Flat) {
+      const Vec3 e1 = Sub(raw_verts[1].position, raw_verts[0].position);
+      const Vec3 e2 = Sub(raw_verts[2].position, raw_verts[0].position);
+      const Vec3 cross = Cross(e1, e2);
+      const Vec3 faceNormal =
+          (LengthSq(cross) > 1e-8f) ? Normalize(cross) : Vec3{0.0f, 0.0f, -1.0f};
+      const Vec3 facePos =
+          Mul(Add(Add(raw_verts[0].position, raw_verts[1].position),
+                  raw_verts[2].position),
+              1.0f / 3.0f);
+      const Vec3 V = Normalize(Mul(facePos, -1.0f));
+
+      const ShadingResult lightRes =
+          ComputeLighting(facePos, faceNormal, V, pso.material,
+                          m_ViewLights, m_NumLights);
+      for (int vi = 0; vi < 3; ++vi) {
+        raw_verts[vi].normal = faceNormal;
+        raw_verts[vi].diff_rgb = lightRes.diff_rgb;
+        raw_verts[vi].spec_rgb = lightRes.spec_rgb;
+        raw_verts[vi].ndotl = std::min(1.0f, lightRes.total_ndotl);
+        raw_verts[vi].nDotH = lightRes.max_ndoth;
+      }
+    }
 
     ShadeVertex clipped[2][3];
     const int n_out =
@@ -518,9 +695,14 @@ void Renderer::DrawMesh(int worker_id, const Mesh &mesh,
 
     bool any_emitted = false;
     for (int ci = 0; ci < n_out; ++ci) {
+      const ShadeVertex &v0 = clipped[ci][0];
+      const ShadeVertex &v1 = clipped[ci][1];
+      const ShadeVertex &v2 = clipped[ci][2];
+      const ShadeVertex clipped_verts[3] = {v0, v1, v2};
+
       uint32_t old_sz = tri_sz;
       Rasterizer::RasterizeProjectedTriangle(
-          worker_id, clipped[ci], pso, m_ProjectionMatrix, m_Viewport, m_PixW,
+          worker_id, clipped_verts, pso, m_ProjectionMatrix, m_Viewport, m_PixW,
           m_PixH, tri_arr, tri_sz, m_ArenaMaxTris,
           submission_order_base + ti);
 
@@ -529,7 +711,7 @@ void Renderer::DrawMesh(int worker_id, const Mesh &mesh,
         ++counter.rasterized;
         uint32_t global_tri_idx =
             static_cast<uint32_t>(worker_id) * m_ArenaMaxTris + old_sz;
-        const ProjectedTriangle &pt = tri_arr[old_sz];
+        ProjectedTriangle &pt = tri_arr[old_sz];
 
         int min_tx = std::max(0, pt.bounding_box.min_x / TILE_SIZE);
         int max_tx =

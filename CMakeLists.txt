@@ -187,6 +187,15 @@ if(TVK_BUILD_TESTS)
     tvk_configure_target(test_challenger_m1_it2)
     add_test(NAME test_challenger_m1_it2 COMMAND ${TVK_TEST_LAUNCHER} $<TARGET_FILE:test_challenger_m1_it2>)
 
+    add_executable(test_adversarial_challenger_it2 tests/test_adversarial_challenger_it2.cpp)
+    target_link_libraries(test_adversarial_challenger_it2 PRIVATE tvk::core)
+    tvk_configure_target(test_adversarial_challenger_it2)
+    add_test(NAME test_adversarial_challenger_it2 COMMAND ${TVK_TEST_LAUNCHER} $<TARGET_FILE:test_adversarial_challenger_it2>)
+
+    add_executable(test_rasterizer_extended tests/test_rasterizer_extended.cpp)
+    target_link_libraries(test_rasterizer_extended PRIVATE tvk::core)
+    tvk_configure_target(test_rasterizer_extended)
+    add_test(NAME test_rasterizer_extended COMMAND ${TVK_TEST_LAUNCHER} $<TARGET_FILE:test_rasterizer_extended>)
 
 endif()
 

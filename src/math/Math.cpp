@@ -92,4 +92,59 @@ Mat4 Mat4Scale(Vec3 v) {
   return mat;
 }
 
+bool Mat4Invert(const Mat4 &m, Mat4 &outInv) {
+  const float a00 = m.m[0][0], a01 = m.m[0][1], a02 = m.m[0][2], a03 = m.m[0][3];
+  const float a10 = m.m[1][0], a11 = m.m[1][1], a12 = m.m[1][2], a13 = m.m[1][3];
+  const float a20 = m.m[2][0], a21 = m.m[2][1], a22 = m.m[2][2], a23 = m.m[2][3];
+  const float a30 = m.m[3][0], a31 = m.m[3][1], a32 = m.m[3][2], a33 = m.m[3][3];
+
+  const float s0 = a20 * a31 - a21 * a30;
+  const float s1 = a20 * a32 - a22 * a30;
+  const float s2 = a20 * a33 - a23 * a30;
+  const float s3 = a21 * a32 - a22 * a31;
+  const float s4 = a21 * a33 - a23 * a31;
+  const float s5 = a22 * a33 - a23 * a32;
+
+  const float c5 = a02 * a13 - a03 * a12;
+  const float c4 = a01 * a13 - a03 * a11;
+  const float c3 = a01 * a12 - a02 * a11;
+  const float c2 = a00 * a13 - a03 * a10;
+  const float c1 = a00 * a12 - a02 * a10;
+  const float c0 = a00 * a11 - a01 * a10;
+
+  const float det = c0 * s5 - c1 * s4 + c2 * s3 + c3 * s2 - c4 * s1 + c5 * s0;
+
+  if (!(std::abs(det) > 1e-8f)) {
+    outInv = Mat4Identity();
+    return false;
+  }
+
+  const float invDet = 1.0f / det;
+  Mat4 res{};
+
+  res.m[0][0] = +(a11 * s5 - a12 * s4 + a13 * s3) * invDet;
+  res.m[0][1] = -(a01 * s5 - a02 * s4 + a03 * s3) * invDet;
+  res.m[0][2] = +(a31 * c5 - a32 * c4 + a33 * c3) * invDet;
+  res.m[0][3] = -(a21 * c5 - a22 * c4 + a23 * c3) * invDet;
+
+  res.m[1][0] = -(a10 * s5 - a12 * s2 + a13 * s1) * invDet;
+  res.m[1][1] = +(a00 * s5 - a02 * s2 + a03 * s1) * invDet;
+  res.m[1][2] = -(a30 * c5 - a32 * c2 + a33 * c1) * invDet;
+  res.m[1][3] = +(a20 * c5 - a22 * c2 + a23 * c1) * invDet;
+
+  res.m[2][0] = +(a10 * s4 - a11 * s2 + a13 * s0) * invDet;
+  res.m[2][1] = -(a00 * s4 - a01 * s2 + a03 * s0) * invDet;
+  res.m[2][2] = +(a30 * c4 - a31 * c2 + a33 * c0) * invDet;
+  res.m[2][3] = -(a20 * c4 - a21 * c2 + a23 * c0) * invDet;
+
+  res.m[3][0] = -(a10 * s3 - a11 * s1 + a12 * s0) * invDet;
+  res.m[3][1] = +(a00 * s3 - a01 * s1 + a02 * s0) * invDet;
+  res.m[3][2] = -(a30 * c3 - a31 * c1 + a32 * c0) * invDet;
+  res.m[3][3] = +(a20 * c3 - a21 * c1 + a22 * c0) * invDet;
+
+  outInv = res;
+  return true;
+}
+
 } // namespace tvk
+
