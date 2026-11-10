@@ -1,8 +1,10 @@
 #include "tvk/platform/PAL.h"
 #include <atomic>
+#include <cerrno>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -24,9 +26,11 @@ namespace {
 std::atomic<bool> s_TerminalActive{false};
 std::atomic<bool> s_AtExitRegistered{false};
 
-constexpr char kInitSeq[] = "\x1b[?1049h\x1b[?25l";
-constexpr char kResetSeq[] =
-    "\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[0m\x1b[?25h\x1b[?2026l\x1b[?1049l";
+TerminalConfig s_ActiveConfig{};
+char s_ResumeSeq[128]{};
+size_t s_ResumeSeqLen = 0;
+char s_ResetSeq[128]{};
+size_t s_ResetSeqLen = 0;
 
 #ifdef _WIN32
 DWORD s_OrigOutMode = 0;
@@ -36,19 +40,24 @@ HANDLE s_SavedOutHandle = INVALID_HANDLE_VALUE;
 HANDLE s_SavedInHandle = INVALID_HANDLE_VALUE;
 #else
 struct termios s_OrigTermios {};
+struct termios s_RawTermios {};
 volatile sig_atomic_t s_HasOrigTermios = 0;
+volatile sig_atomic_t s_HasRawTermios = 0;
 volatile sig_atomic_t s_ResizePending = 0;
+volatile sig_atomic_t s_Suspended = 0;
 
 void SigwinchHandler(int) noexcept { s_ResizePending = 1; }
 
 void AsyncSignalRestoreHandler(int sig) noexcept {
+  const int savedErrno = errno;
   if (s_TerminalActive.exchange(false, std::memory_order_acq_rel)) {
     if (s_HasOrigTermios) {
       tcsetattr(STDIN_FILENO, TCSAFLUSH, &s_OrigTermios);
     }
-    const ssize_t w =
-        ::write(STDOUT_FILENO, kResetSeq, sizeof(kResetSeq) - 1);
-    (void)w;
+    if (s_ResetSeqLen > 0) {
+      const ssize_t w = ::write(STDOUT_FILENO, s_ResetSeq, s_ResetSeqLen);
+      (void)w;
+    }
   }
 
   struct sigaction sa {};
@@ -56,7 +65,63 @@ void AsyncSignalRestoreHandler(int sig) noexcept {
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = 0;
   sigaction(sig, &sa, nullptr);
+  errno = savedErrno;
   raise(sig);
+}
+
+void SigTstpHandler(int sig) noexcept {
+  (void)sig;
+  const int savedErrno = errno;
+  if (s_TerminalActive.load(std::memory_order_relaxed)) {
+    if (s_HasOrigTermios) {
+      tcsetattr(STDIN_FILENO, TCSAFLUSH, &s_OrigTermios);
+    }
+    if (s_ResetSeqLen > 0) {
+      const ssize_t w = ::write(STDOUT_FILENO, s_ResetSeq, s_ResetSeqLen);
+      (void)w;
+      fsync(STDOUT_FILENO);
+    }
+    s_Suspended = 1;
+  }
+
+  struct sigaction sa {};
+  sa.sa_handler = SIG_DFL;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  sigaction(SIGTSTP, &sa, nullptr);
+
+  sigset_t set;
+  sigemptyset(&set);
+  sigaddset(&set, SIGTSTP);
+  sigprocmask(SIG_UNBLOCK, &set, nullptr);
+
+  errno = savedErrno;
+  raise(SIGTSTP);
+}
+
+void SigContHandler(int sig) noexcept {
+  (void)sig;
+  const int savedErrno = errno;
+  if (s_Suspended) {
+    struct sigaction saTstp {};
+    saTstp.sa_handler = SigTstpHandler;
+    sigemptyset(&saTstp.sa_mask);
+    saTstp.sa_flags = SA_RESTART;
+    sigaction(SIGTSTP, &saTstp, nullptr);
+
+    if (s_HasRawTermios) {
+      tcsetattr(STDIN_FILENO, TCSAFLUSH, &s_RawTermios);
+    }
+    if (s_ResumeSeqLen > 0) {
+      const ssize_t w = ::write(STDOUT_FILENO, s_ResumeSeq, s_ResumeSeqLen);
+      (void)w;
+      fsync(STDOUT_FILENO);
+    }
+
+    s_Suspended = 0;
+    s_ResizePending = 1;
+  }
+  errno = savedErrno;
 }
 #endif
 
@@ -103,10 +168,24 @@ bool TryGetTerminalSize(int &out_w, int &out_h) {
   return false;
 }
 
-bool SetupTerminal() {
+bool SetupTerminal(const TerminalConfig &config) {
   if (s_TerminalActive.exchange(true, std::memory_order_acq_rel)) {
     return true;
   }
+
+  bool useAltScreen = config.alternateScreen && config.enableAlternateScreen;
+  bool useHideCursor = config.hideCursor;
+  bool useMouse = config.mouseTracking && config.enableMouseTracking;
+  bool useKitty = config.kittyKeyboard && config.enableKittyKeyboard;
+
+  s_ActiveConfig = config;
+  s_ActiveConfig.alternateScreen = useAltScreen;
+  s_ActiveConfig.enableAlternateScreen = useAltScreen;
+  s_ActiveConfig.hideCursor = useHideCursor;
+  s_ActiveConfig.mouseTracking = useMouse;
+  s_ActiveConfig.enableMouseTracking = useMouse;
+  s_ActiveConfig.kittyKeyboard = useKitty;
+  s_ActiveConfig.enableKittyKeyboard = useKitty;
 
   if (!s_AtExitRegistered.exchange(true, std::memory_order_acq_rel)) {
     std::atexit(RestoreTerminal);
@@ -147,6 +226,8 @@ bool SetupTerminal() {
     raw.c_cc[VMIN] = 0;
     raw.c_cc[VTIME] = 0;
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+    s_RawTermios = raw;
+    s_HasRawTermios = 1;
   }
 
   struct sigaction saCrash {};
@@ -163,10 +244,86 @@ bool SetupTerminal() {
   sigemptyset(&saWinch.sa_mask);
   saWinch.sa_flags = SA_RESTART;
   sigaction(SIGWINCH, &saWinch, nullptr);
+
+  struct sigaction saTstp {};
+  saTstp.sa_handler = SigTstpHandler;
+  sigemptyset(&saTstp.sa_mask);
+  saTstp.sa_flags = SA_RESTART;
+  sigaction(SIGTSTP, &saTstp, nullptr);
+
+  struct sigaction saCont {};
+  saCont.sa_handler = SigContHandler;
+  sigemptyset(&saCont.sa_mask);
+  saCont.sa_flags = SA_RESTART;
+  sigaction(SIGCONT, &saCont, nullptr);
 #endif
 
-  FastPrint(kInitSeq, sizeof(kInitSeq) - 1);
+  // Construct Init & Resume Sequence
+  char initBuf[128];
+  int len = 0;
+  if (useAltScreen) {
+    len += std::snprintf(initBuf + len, sizeof(initBuf) - static_cast<size_t>(len),
+                         "\x1b[?1049h");
+  }
+  if (useHideCursor) {
+    len += std::snprintf(initBuf + len, sizeof(initBuf) - static_cast<size_t>(len),
+                         "\x1b[?25l");
+  }
+  if (useMouse) {
+    len += std::snprintf(initBuf + len, sizeof(initBuf) - static_cast<size_t>(len),
+                         "\x1b[?1000h\x1b[?1002h\x1b[?1006h");
+  }
+  if (useKitty) {
+    len += std::snprintf(initBuf + len, sizeof(initBuf) - static_cast<size_t>(len),
+                         "\x1b[>1u");
+  }
+  s_ResumeSeqLen = static_cast<size_t>(len);
+  std::memcpy(s_ResumeSeq, initBuf, s_ResumeSeqLen);
+  s_ResumeSeq[s_ResumeSeqLen] = '\0';
+
+  // Construct Teardown & Reset Sequence
+  char resetBuf[128];
+  int rLen = 0;
+  if (useMouse) {
+    rLen += std::snprintf(resetBuf + rLen, sizeof(resetBuf) - static_cast<size_t>(rLen),
+                          "\x1b[?1006l\x1b[?1002l\x1b[?1000l");
+  }
+  if (useKitty) {
+    rLen += std::snprintf(resetBuf + rLen, sizeof(resetBuf) - static_cast<size_t>(rLen),
+                          "\x1b[<u");
+  }
+  rLen += std::snprintf(resetBuf + rLen, sizeof(resetBuf) - static_cast<size_t>(rLen),
+                        "\x1b[0m");
+  if (useHideCursor) {
+    rLen += std::snprintf(resetBuf + rLen, sizeof(resetBuf) - static_cast<size_t>(rLen),
+                          "\x1b[?25h");
+  }
+  rLen += std::snprintf(resetBuf + rLen, sizeof(resetBuf) - static_cast<size_t>(rLen),
+                        "\x1b[?2026l");
+  if (useAltScreen) {
+    rLen += std::snprintf(resetBuf + rLen, sizeof(resetBuf) - static_cast<size_t>(rLen),
+                          "\x1b[?1049l");
+  }
+  s_ResetSeqLen = static_cast<size_t>(rLen);
+  std::memcpy(s_ResetSeq, resetBuf, s_ResetSeqLen);
+  s_ResetSeq[s_ResetSeqLen] = '\0';
+
+  if (s_ResumeSeqLen > 0) {
+    FastPrint(s_ResumeSeq, static_cast<unsigned int>(s_ResumeSeqLen));
+  }
   return true;
+}
+
+bool SetupTerminal(bool mouseTracking, bool kittyKeyboard) {
+  TerminalConfig config;
+  config.alternateScreen = true;
+  config.hideCursor = true;
+  config.mouseTracking = mouseTracking;
+  config.kittyKeyboard = kittyKeyboard;
+  config.enableAlternateScreen = true;
+  config.enableMouseTracking = mouseTracking;
+  config.enableKittyKeyboard = kittyKeyboard;
+  return SetupTerminal(config);
 }
 
 void RestoreTerminal() {
@@ -175,7 +332,9 @@ void RestoreTerminal() {
   }
 
 #ifdef _WIN32
-  FastPrint(kResetSeq, sizeof(kResetSeq) - 1);
+  if (s_ResetSeqLen > 0) {
+    FastPrint(s_ResetSeq, static_cast<unsigned int>(s_ResetSeqLen));
+  }
   if (s_SavedOutHandle != INVALID_HANDLE_VALUE) {
     SetConsoleMode(s_SavedOutHandle, s_OrigOutMode);
     FlushFileBuffers(s_SavedOutHandle);
@@ -190,10 +349,24 @@ void RestoreTerminal() {
   if (s_HasOrigTermios) {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &s_OrigTermios);
   }
-  const ssize_t w = ::write(STDOUT_FILENO, kResetSeq, sizeof(kResetSeq) - 1);
-  (void)w;
+  if (s_ResetSeqLen > 0) {
+    const ssize_t w = ::write(STDOUT_FILENO, s_ResetSeq, s_ResetSeqLen);
+    (void)w;
+  }
   fsync(STDOUT_FILENO);
 #endif
+}
+
+const TerminalConfig &GetActiveConfig() {
+  return s_ActiveConfig;
+}
+
+const char *GetActiveResumeSeq() {
+  return s_ResumeSeq;
+}
+
+const char *GetActiveResetSeq() {
+  return s_ResetSeq;
 }
 
 bool IsTerminalSetup() {
@@ -277,6 +450,27 @@ bool PollKey(char &out_char) {
   return false;
 #endif
 }
+ 
+size_t ReadInput(char *buf, size_t maxLen) {
+#ifdef _WIN32
+  if (!buf || maxLen == 0) return 0;
+  size_t count = 0;
+  while (count < maxLen && _kbhit()) {
+    buf[count++] = static_cast<char>(_getch());
+  }
+  return count;
+#else
+  if (!buf || maxLen == 0) return 0;
+  struct pollfd pfd = {STDIN_FILENO, POLLIN, 0};
+  int ret = ::poll(&pfd, 1, 0);
+  if (ret <= 0 || !(pfd.revents & (POLLIN | POLLHUP))) {
+    return 0;
+  }
+  ssize_t n = ::read(STDIN_FILENO, buf, maxLen);
+  return (n > 0) ? static_cast<size_t>(n) : 0;
+#endif
+}
 
 } // namespace pal
 } // namespace tvk
+

@@ -11,9 +11,15 @@
 #include "tvk/core/Assert.h"
 #include "tvk/core/Stats.h"
 #include "tvk/core/JobSystem.h"
+#include "tvk/core/Memory.h"
+#include "tvk/core/Time.h"
+#include "tvk/core/EventBus.h"
+#include "tvk/core/Log.h"
 
-// Layer 1: Platform Abstraction Layer (PAL)
+// Layer 1: Platform Abstraction Layer (PAL) & Input
 #include "tvk/platform/PAL.h"
+#include "tvk/platform/TerminalGuard.h"
+#include "tvk/platform/Input.h"
 
 // Layer 2: Math & SIMD Kernels
 #include "tvk/math/Math.h"
@@ -28,3 +34,8 @@
 #include "tvk/renderer/Rasterizer.h"
 #include "tvk/renderer/Renderer.h"
 #include "tvk/renderer/TerminalPresenter.h"
+
+// Layer 9: Application & Engine Host
+#include "tvk/app/EngineConfig.h"
+#include "tvk/app/Application.h"
+#include "tvk/app/Engine.h"

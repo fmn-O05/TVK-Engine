@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(TVK_Engine VERSION 0.2.0 LANGUAGES C CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD 11)
@@ -22,9 +22,11 @@ option(TVK_MARCH_NATIVE   "Enable host-specific -march=native optimization" OFF)
 set(TVK_CORE_SOURCES
     # Layer 0: Core (Threading, Job System, Memory, Profiling)
     src/core/JobSystem.cpp
+    src/core/Log.cpp
 
     # Layer 1: Platform Abstraction Layer (Terminal TTY, Input, Timing)
     src/platform/PAL.cpp
+    src/platform/Input.cpp
 
     # Layer 2: Math & SIMD Kernels
     src/math/Math.cpp
@@ -43,6 +45,7 @@ set(TVK_CORE_SOURCES
     # Layer 7: Asset Pipeline (Phase 6)
     # Layer 8: Audio Subsystem (Phase 7)
     # Layer 9: Engine Runtime & Application Host (Phase 1 / Phase 4)
+    src/app/Engine.cpp
 )
 
 add_library(tvk_core STATIC ${TVK_CORE_SOURCES})
@@ -163,6 +166,28 @@ if(TVK_BUILD_TESTS)
     target_link_libraries(test_renderer PRIVATE tvk::core)
     tvk_configure_target(test_renderer)
     add_test(NAME test_renderer COMMAND ${TVK_TEST_LAUNCHER} $<TARGET_FILE:test_renderer>)
+
+    add_executable(test_input tests/test_input.cpp)
+    target_link_libraries(test_input PRIVATE tvk::core)
+    tvk_configure_target(test_input)
+    add_test(NAME test_input COMMAND ${TVK_TEST_LAUNCHER} $<TARGET_FILE:test_input>)
+
+    add_executable(test_adversarial_input tests/test_adversarial_input.cpp)
+    target_link_libraries(test_adversarial_input PRIVATE tvk::core)
+    tvk_configure_target(test_adversarial_input)
+    add_test(NAME test_adversarial_input COMMAND ${TVK_TEST_LAUNCHER} $<TARGET_FILE:test_adversarial_input>)
+
+    add_executable(test_adversarial_m1_2 tests/test_adversarial_m1_2.cpp)
+    target_link_libraries(test_adversarial_m1_2 PRIVATE tvk::core)
+    tvk_configure_target(test_adversarial_m1_2)
+    add_test(NAME test_adversarial_m1_2 COMMAND ${TVK_TEST_LAUNCHER} $<TARGET_FILE:test_adversarial_m1_2>)
+
+    add_executable(test_challenger_m1_it2 tests/test_challenger_m1_it2.cpp)
+    target_link_libraries(test_challenger_m1_it2 PRIVATE tvk::core)
+    tvk_configure_target(test_challenger_m1_it2)
+    add_test(NAME test_challenger_m1_it2 COMMAND ${TVK_TEST_LAUNCHER} $<TARGET_FILE:test_challenger_m1_it2>)
+
+
 endif()
 
 # ============================================================================

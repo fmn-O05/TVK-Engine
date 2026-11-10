@@ -39,3 +39,7 @@ latest_perf.txt
 
 # External third-party dumps
 notcurses-master/
+
+# Temporary agent workspaces
+.agents/
+
